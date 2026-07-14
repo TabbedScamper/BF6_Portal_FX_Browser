@@ -105,6 +105,76 @@ EBX. The site player and the Godot map-context overlay both consume this file,
 so the two previews match by construction. Evidence and assumption notes are
 embedded in the file's `_meta`.
 
+## Progress log
+
+### 2026-07-14 — colors, sizes, envelopes, sounds, viewer v2
+
+**The per-emitter override table (the big one).** Authored per-effect
+customization does NOT live in `EmitterGraphParams` (empty on almost every
+effect) but in a second `GpuExposedParameterInput[]` on
+`EmitterGraphEntityData` (raw field `f_512_4832ad52`, 20–70 entries per
+emitter). Found by diffing the four color variants of
+`fx_granite_strike_smoke_marker_{red,green,violet,yellow}` — the ONLY values
+that differ between them are the Vec4s at PropertyIds `0xA1C184C8/0xA1C184C9`,
+and their values are linear-RGB hues matching the variant names
+(red `(0.913,0.031,0.038)`, green `(0.016,0.791,0.074)`,
+violet `(0.748,0.016,0.791)`, yellow `(0.791,0.732,0.016)`). djb2-xor
+confirms the pair is **Color0/Color1** ("Color0" hashes to `0xA1C184C8`,
+one bit below the exe-anchored "Color1"). Colored marker smokes now render
+in their real colors instead of white.
+
+**322 PropertyIds named** (up from 30) by a compound djb2-xor vocabulary hunt
+over every id used by the 376 graph templates (`tools/hunt_pid_names.py`,
+values anchor-checked, ambiguous hits dropped). Highlights: `BaseSize` /
+`BaseSizeBias` / `SpawnSize` / `SizeCurve` / `SizeOverLife` (real particle
+sizes — the smoke-marker plume is authored at 3.5 m, its core puffs 0.9 m),
+`SpawnSpeed(Min/Mult/Bias)` + `SpawnDirectionMin/Max` (mesh/billboard
+ballistics), `EmissiveIntensityMult` (fire Color0/1 are HDR intensities ×14–18),
+the `*OverLife` cubic-envelope family (`a·t³+b·t²+c·t+d`, anchored on
+OpacityOverLife rise-and-fall shapes), `RandomForce`, `TurbulenceFrequency`,
+`SpawnRotationSpeed`, `FadeInSpeed`, `ShrinkStartAge`, ...
+
+**Blend mode: negative result, documented.** The 24+ draw-config booleans on
+the graph root do NOT encode blending — fire and smoke templates are
+bit-identical there (verified across all 376 graphs; no boolean correlates
+with fire-vs-smoke naming). The engine selects Emissive vs VertexLit vs
+GnomonLit per emitter via `ET_LightingModelGS` expression assets whose choice
+is baked into compiled shaders. The pipeline instead derives a per-sheet
+render hint from the decoded pixels (chromatic emissive sheets, mean
+saturation ≈0.78 for fire vs ≈0.003 for lit smoke bases; `LeftRightTiles` =
+6-way lit) — stored as `sprite.render` with the stats as evidence.
+
+**Bursts.** `SpawnModeBurst` templates carry only `ParticleMaxCount` — a
+one-shot with no authored interval (179 of 376 templates). The player
+re-fires bursts on a site-side replay timer (toggleable), flagged as such.
+
+**Sounds.** Effects reference engine sound configs
+(`LegacySoundEffectEntityData.Sound` → e.g.
+`bf03_gadgets_smokegrenade_marker_config_01`); each FX's configs are now in
+the manifest (`sounds_ref`), token-matched against the BF6 Portal SoundBoard
+manifest (the companion SFX Library). Matches stream the clip from the
+soundboard's GitHub Pages — no audio is copied into this repo; unmatched
+configs are listed by name.
+
+**Coverage.** 21 per-map retail dumps (`A:\x\<code>\out`) joined the search
+path (guid indexes generated for the 8 the pipeline hadn't indexed).
+Fixed a nondeterministic atlas-decode failure (fixed-name temp DDS inside a
+Dropbox-synced dir got transiently locked — now a unique file in the OS temp
+dir), which had been silently costing random effects their sprites.
+
+**Viewer v2.** The player stage now matches the Model Library site: dark
+stage with a fading 1 m/5 m floor grid and an orange viewing-box frame sized
+to each effect, orbit (drag) / proportional dolly (scroll) / pan (MMB) and
+RMB freelook with WASD/QE fly (Shift boost, scroll = fly speed). Fixed the
+inherited view matrix (right-vector was negated → the whole stage rendered
+rotated 180° about the view axis; rising smoke used to drift DOWN on
+screen). The player consumes the new decoded data: Color0→Color1 tinting
+(linear→sRGB), decoded BaseSize/SizeCurve, OpacityOverLife envelopes,
+SpawnSpeed ballistics, per-sheet render modes, burst replay, optional linked
+audio, and a per-map availability filter (the same per-map view the SFX/FX
+Folders addon gives creators in the SDK; dzonzla's bf6-portal-fx-showcase
+confirmed the RuntimeSpawn enum source independently).
+
 ## Rebuilding
 
 ```

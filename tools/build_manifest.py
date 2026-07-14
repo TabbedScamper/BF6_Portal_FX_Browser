@@ -59,10 +59,27 @@ COLLECTIONS = (r"C:\Users\mwalt\Dropbox\Personal-Files\Portal"
                r"\bf6-sfx-fx-folders\addons\bf6_sfx_fx\collections.json")
 ASSET_TYPES = (r"C:\Users\mwalt\Dropbox\Personal-Files\Portal\PortalSDK"
                r"\FbExportData\asset_types.json")
-DUMP_ROOTS = [r"A:\bf6dump\bundles", r"A:\aft\bundles"]
-CHUNK_DIRS = [r"A:\bf6dump\chunks", r"A:\aft\chunks"]
-GUID_INDEXES = [os.path.join(DATA, f) for f in
-                ("guid_index.tsv", "guid_index_aft.tsv", "guid_index_dum.tsv")]
+SOUNDBOARD = (r"C:\Users\mwalt\Dropbox\Personal-Files\Portal\BF_Undead"
+              r"\tools\soundboard\manifest.json")
+SOUNDBOARD_URL = "https://tabbedscamper.github.io/BF6_Portal_SoundBoard/"
+# per-map retail dumps (A:\x\<code>\out) from the overnight rollout
+XMAP_CODES = ["abb", "afp", "bad", "bat", "con", "dum", "eas", "fir", "gcl",
+              "gma", "gmr", "gol", "grd", "gst", "gtc", "gun", "lim", "ots",
+              "pla", "sbs", "tun"]
+DUMP_ROOTS = ([r"A:\bf6dump\bundles", r"A:\aft\bundles"] +
+              [r"A:\x\%s\out\bundles" % c for c in XMAP_CODES])
+CHUNK_DIRS = ([r"A:\bf6dump\chunks", r"A:\aft\chunks"] +
+              [r"A:\x\%s\out\chunks" % c for c in XMAP_CODES])
+GUID_INDEXES = ([os.path.join(DATA, f) for f in
+                 ("guid_index.tsv", "guid_index_aft.tsv",
+                  "guid_index_dum.tsv")] +
+                [os.path.join(DATA, "guid_index_%s.tsv" % c)
+                 for c in XMAP_CODES] +
+                # indexes we generated ourselves for dumps the pipeline
+                # hadn't indexed yet (same EFIX scan; see tools/.cache)
+                [os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              ".cache", "guid_index_%s.tsv" % c)
+                 for c in XMAP_CODES])
 AFTERMATH_FX = os.path.join(FX_MINE, "aftermath_fx.json")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -98,6 +115,12 @@ OV_LIFETIME = "f_136_8e72b110"
 # EmitterGraphEntityData: per-emitter texture override array
 ENT_TEXOVERRIDE = "f_520_1c1e4b15"
 ENT_TEXOVERRIDE_PTR = "f_0_8cf424e7"
+# EmitterGraphEntityData: THE per-emitter exposed-parameter override table
+# (GpuExposedParameterInput[], 20-70 entries on authored effects). Found by
+# diffing the color variants of fx_granite_strike_smoke_marker_* -- the
+# Color0/Color1 tints that distinguish red/green/violet/yellow live here
+# (the previously-read EmitterGraphParams array is empty on those effects).
+ENT_PARAM_OVERRIDES = "f_512_4832ad52"
 # 2042-correlated label of the pointer to the eg_*.ebx template
 ENT_GRAPH_PTR = "EmitterGraphComputeShaderTextures"
 ENT_OVERRIDES = "EmitterGraphOverrides"
@@ -109,30 +132,12 @@ GR_CORE_NAMES = ["emitter_lifespan", "max_spawn_distance", "particle_lifespan",
 GR_GLOBALSORT = "f_144_af0e5c31"       # GlobalSortingInfo struct
 GR_PARAMTABLE = "CustomMaskTextures"   # 2042 label collision: exposed params
 
-# PropertyId -> name. Base set from the emitter-graph study; the rest were
-# recovered this project by hashing bf6.exe strings + compound identifiers
-# (djb2-xor, case-sensitive) against every id used by the study graphs and
-# anchor-checking values (Gravity=-9.81, Restitution=0.3, SpawnRot=+-180 family).
-EXTRA_PIDS = {
-    0x04028C80: "IntensityMin",
-    0x04E14CF6: "OpacityMinMult",
-    0x0C8950D9: "RotationOverLife",
-    0x2FD2E956: "RotationSpeed",
-    0x3D1607D4: "OpacityOverLife",
-    0x3DAD1982: "SpeedMult",
-    0x4B9E504F: "TurbulenceEndMult",
-    0x5FC88729: "GravityMinMult",
-    0x65A739AE: "SpawnSpeedCurve",
-    0x8906E021: "Restitution",
-    0xAF2F1C05: "TurbulenceStrength",
-    0xC46720E3: "Gravity",
-    0xCDB76C39: "SpawnSpeed",
-    0xD1897F69: "LifeMinMult",
-    0xDAB1F468: "SpeedMinMult",
-    0xE5C35109: "RandomColorMin",
-    0xE5C35217: "RandomColorMax",
-    0xECE99AF7: "SpawnRot",
-}
+# PropertyId -> name: tools/pid_names.json (322 names; exe-string anchors +
+# compound djb2-xor hunt, values anchor-checked -- see tools/hunt_pid_names.py).
+# Key finds this round: Color0 (0xA1C184C8, the second tint of the smoke-marker
+# color pair), BaseSize/BaseSizeBias/SpawnSize/SizeCurve (real particle sizes),
+# EmissiveIntensityMult/Curve, the *OverLife cubic envelope family, and the
+# mesh-ballistics set (SpawnDirectionMin/Max, SpawnSpeedMin/Mult/Bias, ...).
 
 CLASS_RULES = [
     ("fire", r"fire|flame|burn|ignit|torch|candle|molotov|incendiar"),
@@ -347,10 +352,9 @@ def qsf(v, quality="High"):
     return v
 
 
-PID_NAMES = {int(k): v[0] for k, v in
-             json.load(open(os.path.join(FX_MINE, "propertyid_names.json"),
-                            encoding="utf-8")).items()}
-PID_NAMES.update(EXTRA_PIDS)
+PID_NAMES = {int(k): v for k, v in
+             json.load(open(os.path.join(HERE, "pid_names.json"),
+                            encoding="utf-8")).items() if k != "_meta"}
 
 
 def graph_family(relpath):
@@ -367,6 +371,25 @@ def graph_family(relpath):
     return "other"
 
 
+# parameter names whose Vec4 payload is a real vector/curve (cubic envelope
+# coefficients, RGB colors, per-axis values) -- everything else broadcasts one
+# scalar across xyzw (per-quality) or packs it as (value,0,0,0)
+VEC_PID_RE = re.compile(
+    r"color|curve|overlife|overz|overradius|overfacing|minmax|axis|"
+    r"direction$|position$|offset$|pivot$|range\d?$|heightalpha|frame(range)",
+    re.I)
+
+
+def pid_value(nm, v):
+    vec = [round(v.get(a, 0), 6) for a in "xyzw"]
+    if VEC_PID_RE.search(nm):
+        return vec
+    # scalar packings: per-quality broadcast (x,x,x,x) or plain (x,0,0,0)
+    if vec[1] == vec[2] == vec[3] == 0 or vec.count(vec[0]) == 4:
+        return vec[0]
+    return vec
+
+
 def param_table(inst_or_root, key=GR_PARAMTABLE):
     out = {}
     for p in (inst_or_root.get(key) or []):
@@ -376,10 +399,17 @@ def param_table(inst_or_root, key=GR_PARAMTABLE):
         nm = PID_NAMES.get(pid)
         v = p.get("Value")
         if nm and isinstance(v, dict):
-            vec = [round(v.get(a, 0), 6) for a in "xyzw"]
-            scalar_ok = nm not in ("Color1", "RandomColorMin", "RandomColorMax")
-            out[nm.lower()] = vec[0] if scalar_ok else vec
+            out[nm.lower()] = pid_value(nm, v)
     return out
+
+
+def param_table_unknown_count(inst_or_root, key=GR_PARAMTABLE):
+    n = 0
+    for p in (inst_or_root.get(key) or []):
+        if isinstance(p, dict) and \
+                ((p.get("Normalize") or 0) & 0xFFFFFFFF) not in PID_NAMES:
+            n += 1
+    return n
 
 
 class GraphCache:
@@ -486,13 +516,21 @@ def decode_bcn_top(pix, w, h, dxgi):
     need = max(1, (w + 3) // 4) * max(1, (h + 3) // 4) * block
     dds = (DDS_T + struct.pack("<I", h) + struct.pack("<I", w) + DDS_T1 +
            DDS_X + DDS_T2 + struct.pack("<i", dxgi) + DDS_T3 + pix[:need])
-    os.makedirs(CACHE, exist_ok=True)
-    tmp = os.path.join(CACHE, "_tex_tmp.dds")
-    open(tmp, "wb").write(dds)
-    im = Image.open(tmp)
-    im.load()
-    im = im.convert("RGBA")
-    os.remove(tmp)
+    # unique name in the REAL temp dir -- a fixed name inside the (Dropbox-
+    # synced) .cache dir gets transiently locked by the sync client, which
+    # made random atlases fail to decode per run
+    fd, tmp = tempfile.mkstemp(suffix=".dds")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(dds)
+        im = Image.open(tmp)
+        im.load()
+        im = im.convert("RGBA")
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
     return im
 
 
@@ -592,9 +630,29 @@ class AtlasCache:
         png = "%s_%dx%d.png" % (re.sub(r"_\d+x\d+", "", base), cols, frames)
         os.makedirs(TEXOUT, exist_ok=True)
         im.save(os.path.join(TEXOUT, png), optimize=True)
+        # blend/lighting hint from the sheet pixels. The draw-config booleans
+        # do NOT encode blending (fire and smoke graphs are bit-identical
+        # there); the engine picks Emissive vs (Gnomon/Vertex)Lit via
+        # ET_LightingModelGS expressions baked into compiled shaders. What
+        # DOES survive is the sheet itself: emissive sheets carry chromatic
+        # flame color in RGB, lit smoke sheets are desaturated lighting bases.
+        sm = im.resize((64, 64))
+        pix = list(sm.getdata())
+        n = sat = luma = 0
+        for r_, g_, b_, a_ in pix:
+            if a_ > 60:
+                n += 1
+                mx, mn = max(r_, g_, b_), min(r_, g_, b_)
+                sat += (mx - mn) / 255.0
+                luma += mx / 255.0
+        sat = sat / n if n else 0.0
+        luma = luma / n if n else 0.0
+        render = "sixway" if lr else ("emissive" if sat > 0.18 else "lit")
         return {"file": "textures/" + png, "sheet_px": [im.size[0], im.size[1]],
                 "source_px": [w, h], "cols": cols, "frames": frames,
                 "rows": rows, "left_right_tiles": lr,
+                "render": render, "sheet_sat": round(sat, 3),
+                "sheet_luma": round(luma, 3),
                 "ebx": relpath.replace("\\", "/")}
 
 
@@ -659,6 +717,62 @@ class MeshCache:
                 "ebx": relpath.replace("\\", "/")}
 
 
+# ------------------------------------------------------- soundboard join ---
+class SoundMatcher:
+    """FX sound-config name -> BF6 Portal SoundBoard clip (reference only;
+    audio stays hosted on the soundboard's GitHub Pages).
+
+    The FX blueprints reference engine sound configs
+    (bf03_gadgets_smokegrenade_marker_config_01); the soundboard manifest
+    carries the Portal SFX_ names of its 1,5xx captured clips. Joined by
+    name-token overlap; conservative threshold, unmatched configs are kept
+    in the manifest as plain names."""
+
+    STOP = {"bf03", "bf04", "bf06", "config", "sound", "snd", "sfx", "vo",
+            "one", "shot", "oneshot", "oneshot3d", "simpleloop3d", "lfe",
+            "2d", "3d", "v1", "v2", "amb", "emt", "master"}
+
+    def __init__(self):
+        self.entries = []
+        try:
+            sb = json.load(open(SOUNDBOARD, encoding="utf-8"))
+        except Exception:
+            sb = []
+        for e in sb:
+            if e.get("vo"):
+                continue
+            toks = self._toks(e.get("name", ""))
+            if toks:
+                self.entries.append((toks, e))
+
+    def _toks(self, s):
+        out = set()
+        for t in re.split(r"[^a-z0-9]+", s.lower()):
+            if len(t) > 2 and t not in self.STOP and not t.isdigit():
+                out.add(t)
+        return out
+
+    def match(self, cfg):
+        want = self._toks(cfg)
+        joined = "".join(sorted(want))
+        best, bs = None, 0
+        for toks, e in self.entries:
+            inter = want & toks
+            score = sum(len(t) for t in inter)
+            # long compound tokens count when embedded (smokegrenade in
+            # grenadesmoke_marker etc.)
+            for t in toks - inter:
+                if len(t) >= 6 and t in joined:
+                    score += len(t) - 2
+            if score > bs:
+                bs, best = score, e
+        if best and bs >= 10:
+            return {"sb_name": best["name"], "clip": best["file"],
+                    "dur": best.get("dur"), "loop": best.get("loop"),
+                    "score": bs}
+        return None
+
+
 # ------------------------------------------------------------ classify -----
 def classify(portal_name, emitters):
     hay = portal_name.lower() + " " + " ".join(
@@ -696,7 +810,8 @@ def parse_effect(path, gi, graphs, atlases, meshes, name_idx, depth=0, seen=None
         return [], {}
     seen.add(key)
     d = dump_ebx(path, gi)
-    emitters, meta = [], {"lights": 0, "sounds": 0, "other_entities": []}
+    emitters, meta = [], {"lights": 0, "sounds": 0, "other_entities": [],
+                          "sound_configs": []}
     for inst in d["instances"]:
         if not isinstance(inst, dict):
             continue
@@ -712,6 +827,14 @@ def parse_effect(path, gi, graphs, atlases, meshes, name_idx, depth=0, seen=None
             meta["lights"] += 1
         elif "Sound" in t:
             meta["sounds"] += 1
+            # sound config reference (e.g. LegacySoundEffectEntityData.Sound
+            # -> common/sound/.../bf03_gadgets_smokegrenade_marker_config_01)
+            for v in inst.values():
+                if isinstance(v, dict) and v.get("import") and v.get("path") \
+                        and "sound" in v["path"].replace("\\", "/").lower():
+                    cfg = os.path.basename(v["path"])[:-4]
+                    if cfg not in meta["sound_configs"]:
+                        meta["sound_configs"].append(cfg)
         elif t and t not in ("InterfaceDescriptorData", "CompareBoolEntityData",
                              "SelectIntEntityData") and not t.startswith("f_") \
                 and "-" not in t:
@@ -724,11 +847,15 @@ def parse_effect(path, gi, graphs, atlases, meshes, name_idx, depth=0, seen=None
         if b.startswith("fx_") and ("/fx/" in rl or rl.startswith("common/fx")):
             child = find_dump_file(rel, name_idx)
             if child and child.replace("\\", "/").lower() != key:
-                sub, _m = parse_effect(child, gi, graphs, atlases, meshes,
+                sub, m2 = parse_effect(child, gi, graphs, atlases, meshes,
                                        name_idx, depth + 1, seen)
                 for e in sub:
                     e["from_child"] = os.path.basename(rel)
                 emitters.extend(sub)
+                for cfg in m2.get("sound_configs", []):
+                    if cfg not in meta["sound_configs"]:
+                        meta["sound_configs"].append(cfg)
+                meta["sounds"] += m2.get("sounds", 0)
     return emitters, meta
 
 
@@ -768,8 +895,14 @@ def parse_emitter(inst, graphs, atlases, meshes):
     if unk:
         em["raw_overrides"] = unk
     p = dict(g["params"])
-    p.update(param_table(inst, ENT_PARAMS))   # per-effect exposed overrides
+    # per-emitter exposed-parameter override table (the authored per-effect
+    # customization; this is where the smoke-marker colors live)
+    ov_params = param_table(inst, ENT_PARAM_OVERRIDES)
+    p.update(ov_params)
+    p.update(param_table(inst, ENT_PARAMS))
     em["params"] = p
+    if ov_params:
+        em["n_overrides"] = len(inst.get(ENT_PARAM_OVERRIDES) or [])
     # sprite: per-emitter texture override beats the template default
     atlas_rel = None
     for e in (inst.get(ENT_TEXOVERRIDE) or []):
@@ -783,6 +916,10 @@ def parse_emitter(inst, graphs, atlases, meshes):
     # mesh emitter: graph-level RigidMeshAsset import, or entity-level pointers.
     # volume-decal / distortion graphs also import a box mesh, but that is a
     # projection volume, not a rendered particle -- skip those families.
+    # Unit-primitive meshes (defaulttriangle/unitquad/debug axis/null) are
+    # GPU-sim placeholders scaled in shaders, not real geometry -- skip them
+    # so pebbles/thindebris stay on their procedural path.
+    UTIL_MESH = r"defaulttriangle|unitquad|debug_axis|_null_|lasersightbeam"
     mesh_rel = g.get("mesh") if fam not in ("volumedecals", "smokefire") else None
     if mesh_rel and "volumedecal" in mesh_rel.lower():
         mesh_rel = None
@@ -790,6 +927,8 @@ def parse_emitter(inst, graphs, atlases, meshes):
         if isinstance(ptr, dict) and ptr.get("path"):
             mesh_rel = ptr["path"]
             break
+    if mesh_rel and re.search(UTIL_MESH, os.path.basename(mesh_rel).lower()):
+        mesh_rel = None
     if fam in RENDER_FAMS_T1 and atlas_rel:
         sp = atlases.get(atlas_rel)
         if sp:
@@ -851,8 +990,26 @@ def build_editor_params(graphs, atlases, entries):
             "opacity_min_mult": p.get("opacityminmult"),
             "opacity_over_life": p.get("opacityoverlife"),
             "color": p.get("color1"),
+            "color0": p.get("color0"),
             "temperature": p.get("temperature"),
             "intensity": p.get("intensity"),
+            # newly-cracked pid set (2026-07): real sizes + envelopes
+            "base_size": p.get("basesize"),
+            "base_size_bias": p.get("basesizebias"),
+            "spawn_size": p.get("spawnsize"),
+            "size_curve": p.get("sizecurve"),
+            "size_over_life": p.get("sizeoverlife"),
+            "spawn_rotation_speed": p.get("spawnrotationspeed"),
+            "emissive_intensity_mult": p.get("emissiveintensitymult"),
+            "fade_in_speed": p.get("fadeinspeed"),
+            "fade_start_age": p.get("fadestartage"),
+            "shrink_start_age": p.get("shrinkstartage"),
+            "spawn_speed_min": p.get("spawnspeedmin"),
+            "spawn_speed_mult": p.get("spawnspeedmult"),
+            "spawn_direction_min": p.get("spawndirectionmin"),
+            "spawn_direction_max": p.get("spawndirectionmax"),
+            "random_force": p.get("randomforce"),
+            "turbulence_frequency": p.get("turbulencefrequency"),
             "slider_ranges": g.get("sliders") or None,
             "emitter_bbox": g.get("bbox"),
         }
@@ -863,6 +1020,7 @@ def build_editor_params(graphs, atlases, entries):
             e["frames"] = sp["frames"]
             e["fps"] = round(sp["frames"] / life, 2) if life else None
             e["six_way_lighting"] = sp["left_right_tiles"]
+            e["render"] = sp.get("render")
         if g.get("mesh"):
             e["mesh_ebx"] = g["mesh"]
         return {k: v for k, v in e.items() if v is not None}
@@ -898,10 +1056,10 @@ def build_editor_params(graphs, atlases, entries):
                 "fps": "frames/lifetime (playback rate is baked into the "
                        "compiled flipbook shader; no authored fps survives "
                        "in EBX)",
-                "size_min/size_max/grow/rise_mps": "particle size and "
-                       "size-over-life live in baked compute shaders; these "
-                       "defaults are visual-reference tuned and marked per "
-                       "class in class_defaults",
+                "size_min/size_max/grow/rise_mps": "class fallbacks only: "
+                       "BaseSize/SpawnSize/SizeCurve are now decoded where "
+                       "authored (per graph and per effect emitter); "
+                       "class_defaults apply to emitters without them",
                 "emission": "per-effect spawn bounds come from each effect's "
                        "override block in manifest.json (bbox field); the "
                        "graph emitter_bbox here is the template culling box",
@@ -965,8 +1123,10 @@ def main():
     graphs = GraphCache(name_idx, gi)
     atlases = AtlasCache(name_idx, gi)
     meshes = MeshCache(name_idx)
+    sounds = SoundMatcher()
     entries, stats = [], {"wrapper": 0, "direct": 0, "unmatched": 0}
     consistency = [0, 0]
+    sound_stats = [0, 0]   # matched configs, total configs
 
     for i, (name, maps) in enumerate(fx):
         bp, how = resolve_blueprint(name, name_idx, gi)
@@ -986,6 +1146,19 @@ def main():
                 emitters, meta = [], {"error": "%s: %s" % (type(ex).__name__, ex)}
             entry["emitters"] = emitters
             entry.update({k: v for k, v in meta.items() if v})
+            if meta.get("sound_configs"):
+                slist = []
+                for cfg in meta["sound_configs"]:
+                    m = sounds.match(cfg)
+                    sound_stats[1] += 1
+                    if m:
+                        sound_stats[0] += 1
+                        slist.append({"config": cfg, "sb_name": m["sb_name"],
+                                      "clip": m["clip"], "dur": m["dur"],
+                                      "loop": m["loop"]})
+                    else:
+                        slist.append({"config": cfg})
+                entry["sounds_ref"] = slist
             for e in emitters:
                 r, l, m = (e["spawn_rate"]["value"], e["lifetime"]["value"],
                            e["max_count"])
@@ -1020,12 +1193,38 @@ def main():
         "_meta": {
             "generator": "tools/build_manifest.py",
             "built": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "source": "BF6 retail EBX dumps (common + Aftermath superbundles)",
+            "source": "BF6 retail EBX dumps (common + %d map superbundles)"
+                      % len(DUMP_ROOTS),
             "portal_fx_total": len(entries),
             "match": stats,
             "tiers": {"tier1_flipbook": tiers[1], "tier2_procedural": tiers[2],
                       "tier3_placeholder": tiers[3], "tier4_mesh": tiers[4]},
             "classes": classes,
+            "soundboard_url": SOUNDBOARD_URL,
+            "sound_configs_matched": "%d/%d" % tuple(sound_stats),
+            "evidence": {
+                "colors": "per-emitter GpuExposedParameterInput override "
+                          "table (EmitterGraphEntityData f_512); proven by "
+                          "diffing fx_granite_strike_smoke_marker_"
+                          "{red,green,violet,yellow} -- only Color0/Color1 "
+                          "(pids 0xA1C184C8/C9) differ, hues match the "
+                          "variant names (values are linear RGB)",
+                "blend": "draw-config booleans do NOT encode blending (fire "
+                         "and smoke graph templates are bit-identical "
+                         "there); Emissive vs Lit is an ET_LightingModelGS "
+                         "expression baked into compiled shaders. The "
+                         "player derives it from the decoded sheet pixels "
+                         "(chromatic emissive sheets vs desaturated lit "
+                         "bases; sprite.render + sheet_sat evidence).",
+                "burst": "SpawnModeBurst templates carry only "
+                         "ParticleMaxCount (one-shot; no authored interval "
+                         "survives); the player's replay period is "
+                         "site-side.",
+                "curves": "*OverLife/*Curve params are cubic envelope "
+                          "coefficients a*t^3+b*t^2+c*t+d, t=age/life "
+                          "(anchored on OpacityOverLife rise-fall shapes); "
+                          "interpretation derived, flagged.",
+            },
             "assumed": {
                 "flipbook_fps": "playback rate is a baked shader constant; "
                                 "the player uses frames/lifetime looped",
@@ -1035,9 +1234,13 @@ def main():
                                       "%d/%d looping emitters; burst "
                                       "emitters exceed it by design)"
                                       % tuple(consistency),
-                "particle_size": "not present in EBX (lives in baked compute "
-                                 "shaders); see editor_fx_params.json "
-                                 "class_defaults",
+                "particle_size": "BaseSize/SpawnSize/SizeCurve pids are now "
+                                 "decoded where authored; emitters without "
+                                 "them fall back to editor_fx_params.json "
+                                 "class_defaults (flagged)",
+                "burst_replay": "the site player re-fires burst emitters on "
+                                "a repeat timer (max particle life + pad); "
+                                "in-game these are event-triggered",
             },
         },
         "fx": entries,
@@ -1058,6 +1261,7 @@ def main():
     print("tiers: t1=%d t2=%d t3=%d mesh=%d   classes: %s" %
           (tiers[1], tiers[2], tiers[3], tiers[4], classes))
     print("override consistency (continuous, rate*life<=1.5*max): %d/%d" % tuple(consistency))
+    print("sound configs matched to soundboard: %d/%d" % tuple(sound_stats))
     print("textures: %d   meshes: %d   graphs parsed: %d   atlases: %d" %
           (ntex, nmesh, len(graphs.cache), len(atlases.cache)))
     print("total %.1f s" % (time.time() - t0))
