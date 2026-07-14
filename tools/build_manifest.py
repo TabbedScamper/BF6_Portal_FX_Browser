@@ -7,7 +7,10 @@ Pipeline (all real game data, no invented parameters):
        the real fx_*.ebx EffectBlueprint  [fallback: direct fx_<name>.ebx]
     -> EffectBlueprint: N x EmitterGraphEntityData, each referencing a shared
        eg_*.ebx EmitterGraph template + a per-effect override block
-       (spawn rate / particle lifetime / max count / spawn bounds)
+       (spawn rate / particle lifetime / max count / spawn bounds) + THE
+       per-emitter exposed-parameter override table (f_512: Color0/Color1
+       tints, BaseSize, SpawnSpeed, opacity/size envelopes, ...) + sound
+       config refs (joined to the SFX Library soundboard, reference-only)
     -> EmitterGraph template: spawn mode (continuous/burst), per-quality
        lifespans, exposed-parameter constant table (Buoyancy/Drag/WindStrength/
        Color1/Opacity/Temperature/Gravity/Restitution/...),
@@ -728,9 +731,24 @@ class SoundMatcher:
     name-token overlap; conservative threshold, unmatched configs are kept
     in the manifest as plain names."""
 
-    STOP = {"bf03", "bf04", "bf06", "config", "sound", "snd", "sfx", "vo",
-            "one", "shot", "oneshot", "oneshot3d", "simpleloop3d", "lfe",
-            "2d", "3d", "v1", "v2", "amb", "emt", "master"}
+    STOP = {"bf01", "bf03", "bf04", "bf06", "config", "sound", "snd", "sfx",
+            "vo", "one", "shot", "oneshot", "oneshot3d", "simpleloop3d",
+            "lfe", "2d", "3d", "v1", "v2", "amb", "emt", "master"}
+    # structural / location tokens: shared by unrelated sounds, so they carry
+    # no evidence of a real match (fire_medium was matching Water_Splash via
+    # levels+shared+spots before this list existed)
+    GENERIC = {"levels", "shared", "spots", "base", "small", "medium",
+               "large", "big", "close", "distant", "loop", "start", "stop",
+               "world", "bigworld", "event", "spawnable", "generic",
+               "brooklyn", "cairo", "gibraltar", "utar", "vtar", "dumbo",
+               "granite", "aftermath", "subsurface", "battery", "outskirts",
+               "firestorm", "golmud", "limestone", "plaza", "eastwood",
+               "badlands", "contaminated", "nightraid", "oceanpark",
+               "abbasid", "sand", "portal",
+               # broad category words shared by unrelated sounds
+               "vehicles", "weapons", "gadgets", "destruction", "explosion",
+               "explosions", "abilities", "handheld", "impacts", "props",
+               "soldier", "damage", "throwables"}
 
     def __init__(self):
         self.entries = []
@@ -753,23 +771,33 @@ class SoundMatcher:
         return out
 
     def match(self, cfg):
-        want = self._toks(cfg)
+        want_all = self._toks(cfg)
+        want = want_all - self.GENERIC
         joined = "".join(sorted(want))
-        best, bs = None, 0
+        best, bs = None, (0, 0)
         for toks, e in self.entries:
-            inter = want & toks
+            spec = toks - self.GENERIC
+            inter = want & spec
             score = sum(len(t) for t in inter)
-            # long compound tokens count when embedded (smokegrenade in
-            # grenadesmoke_marker etc.)
-            for t in toks - inter:
-                if len(t) >= 6 and t in joined:
+            # long compound tokens count when embedded (crateexplode in
+            # supplydrop_crateexplode etc.); >=8 chars so short fragments
+            # of a longer word ("deploy" inside "deployablecover") don't
+            # outrank an exact sibling
+            for t in spec - inter:
+                if len(t) >= 8 and t in joined:
                     score += len(t) - 2
-            if score > bs:
-                bs, best = score, e
-        if best and bs >= 10:
+            # tiebreak on the full overlap so e.g. DeployableCover
+            # "Destruction" beats "Deploy" when the specific score ties
+            tie = sum(len(t) for t in (want_all & toks))
+            if (score, tie) > bs:
+                bs, best = (score, tie), e
+        # only distinctive-token evidence counts; 8+ chars of shared
+        # specific tokens (e.g. "autocannon", "deployablecover", or
+        # "supplydrop") -- weak single-theme overlaps stay unmatched
+        if best and bs[0] >= 8:
             return {"sb_name": best["name"], "clip": best["file"],
                     "dur": best.get("dur"), "loop": best.get("loop"),
-                    "score": bs}
+                    "score": bs[0]}
         return None
 
 
