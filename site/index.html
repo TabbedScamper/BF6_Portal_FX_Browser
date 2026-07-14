@@ -6,7 +6,7 @@
 <title>BF6 Portal &mdash; FX Library</title>
 <meta name="description" content="Battlefield 6 Portal particle effects library &mdash; browse and preview every placeable FX, rebuilt from decoded game data." />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%23ff6b1a'/%3E%3Cg fill='%23140a04'%3E%3Ccircle cx='12' cy='15' r='5'/%3E%3Cpath d='M12 3c1 3 4 4 4 8a4 4 0 0 1-8 0c0-4 3-5 4-8z'/%3E%3C/g%3E%3C/svg%3E" />
-<link rel="stylesheet" href="style.css?v=1" />
+<link rel="stylesheet" href="style.css?v=2" />
 </head>
 <body>
 
@@ -34,7 +34,7 @@
         <p>Battlefield&nbsp;6 Portal &middot; particle&nbsp;effects</p>
       </div>
     </div>
-    <div class="ver" title="Library version"><span class="v100">V0.10</span></div>
+    <div class="ver" title="Library version"><span class="v100">V0.20</span></div>
     <nav class="topnav" aria-label="Site">
       <button class="topnav-tab" id="aboutBtn">Info</button>
     </nav>
@@ -60,17 +60,26 @@
       <p>Every card is a <b>Portal-placeable FX</b> from the Battlefield&nbsp;6 Portal
       editor (the spatial FX_ spawn list). The previews are not videos &mdash; they are
       re-simulated live in your browser from parameters decoded out of the game files:
-      spawn rates, particle lifetimes, drag / wind / buoyancy constants, tint colors and
-      the exact flipbook sprite sheets with their authored grid layouts.</p>
+      spawn rates, particle lifetimes and sizes, spawn speeds, drag / wind / gravity
+      constants, the authored <b>Color0/Color1 tints</b> (this is what makes the colored
+      marker smokes red/green/violet/yellow), opacity-over-life envelopes, and the exact
+      flipbook sprite sheets with their authored grid layouts.</p>
       <p><b>LIVE</b> effects use the game's billboard/flipbook pipeline and real sprite
       atlases. <b>PROC</b> effects (sparks) are procedural streak approximations of the
       game's GPU spark sims. <b>MESH</b> effects spawn the actual game mesh (darts,
       rockets, debris chunks) with the decoded emitter parameters. <b>SOON</b> effects
       run on baked compute shaders (screen effects, decals) or live in map bundles not
       mined yet &mdash; those get in-game captures later.</p>
-      <p>The browser player is an approximation: exact particle motion and sizing are
-      baked into compiled GPU shaders, so unknown values use documented defaults. Colors,
-      rates, lifetimes, sprites and grids are authentic game data.</p>
+      <p>Effects that reference an in-game sound config show a <b>♪ speaker button</b>
+      &mdash; it streams the matching clip from the companion
+      <a href="https://tabbedscamper.github.io/BF6_Portal_SoundBoard/" target="_blank" rel="noopener">SFX Library</a>
+      (nothing is duplicated here; unmatched configs are listed by name).</p>
+      <p><b>Viewer controls:</b> drag = orbit &middot; scroll = zoom &middot; middle mouse = pan
+      &middot; hold right mouse = freelook with <b>WASD</b> fly (Q/E down/up, Shift = boost,
+      scroll = fly speed) &mdash; the same scheme as the Model Library site.</p>
+      <p>The browser player is an approximation: exact particle motion is baked into
+      compiled GPU shaders, so remaining unknowns use documented defaults. Colors, sizes,
+      rates, lifetimes, envelopes, sprites and grids are authentic game data.</p>
     </div>
   </div>
 </div>
@@ -83,6 +92,9 @@
       <input type="text" id="search" placeholder="Search effects&hellip; (name, map, emitter)" autocomplete="off" />
       <button class="search-clear" id="searchClear" aria-label="Clear search">&times;</button>
     </div>
+    <select id="mapSel" class="mapsel" title="Filter by map availability (per-map view, same as the SFX/FX Folders addon)">
+      <option value="all">All maps</option>
+    </select>
     <label class="toggle" title="Show only effects with a live preview">
       <input type="checkbox" id="onlyLive" />
       <span class="toggle-track"><span class="toggle-dot"></span></span>
@@ -105,7 +117,12 @@
         <h2 id="playerName">&mdash;</h2>
         <div class="player-badges" id="playerBadges"></div>
       </div>
-      <button class="player-close" id="playerClose" aria-label="Close">&times;</button>
+      <div class="player-actions">
+        <button class="sound-btn" id="soundBtn" hidden title="Play the linked SFX Library clip">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8.5 8.5 0 0 1 0 12"/></svg>
+        </button>
+        <button class="player-close" id="playerClose" aria-label="Close">&times;</button>
+      </div>
     </div>
     <div class="player-stage-wrap">
       <canvas id="stage"></canvas>
@@ -114,7 +131,11 @@
         <div class="ph-title">NO LIVE PREVIEW YET</div>
         <div class="ph-sub" id="phReason"></div>
       </div>
-      <div class="player-hint">drag &middot; orbit &nbsp;&nbsp; wheel &middot; zoom</div>
+      <div class="player-hint" id="playerHint">drag = orbit &middot; scroll = zoom &middot; MMB = pan &middot; RMB = freelook + WASD fly (scroll = speed)</div>
+      <label class="replay-toggle" id="replayWrap" hidden title="This effect is a one-shot burst in game; the player re-fires it on a timer">
+        <input type="checkbox" id="replayChk" checked />
+        <span>replay burst</span>
+      </label>
     </div>
     <div class="player-side">
       <div class="pgroup" id="playerEmitters"></div>
@@ -127,6 +148,6 @@
   Not affiliated with EA or DICE. Battlefield is a trademark of Electronic&nbsp;Arts.</p>
 </footer>
 
-<script src="app.js?v=1"></script>
+<script src="app.js?v=2"></script>
 </body>
 </html>

@@ -5,6 +5,10 @@
    manifest.json + editor_fx_params.json, both decoded from game
    data by tools/build_manifest.py; approximations are documented
    in the README and flagged in the data files.
+
+   Viewer stage: orbit (drag) / dolly (wheel) / pan (MMB) plus
+   RMB freelook + WASD fly — same control scheme as the BF6
+   Portal Model Library site.
    ============================================================ */
 "use strict";
 
@@ -26,7 +30,8 @@ const TIER_TITLE = {
 
 let MANIFEST = null;
 let ED = { class_defaults: {}, graphs: {} };
-let FILTER = { cls: "all", q: "", onlyLive: false };
+let FILTER = { cls: "all", q: "", onlyLive: false, map: "all" };
+let SB_URL = "https://tabbedscamper.github.io/BF6_Portal_SoundBoard/";
 
 /* ------------------------------------------------------------ boot ---- */
 Promise.all([
@@ -36,8 +41,10 @@ Promise.all([
   .then(([m, ep]) => {
     MANIFEST = m;
     ED = ep || ED;
+    if (m._meta.soundboard_url) SB_URL = m._meta.soundboard_url;
     buildStats(m);
     buildChips(m);
+    buildMapSelect(m);
     renderGrid();
     $("#loader").classList.add("hide");
   })
@@ -83,6 +90,26 @@ function buildChips(m) {
   );
 }
 
+/* per-map availability filter — the same per-map view the SFX/FX Folders
+   addon gives creators inside the SDK (maps from the SDK level restrictions) */
+function mapLabel(code) {
+  return code.replace(/^MP_/, "").replace(/_/g, " ");
+}
+function buildMapSelect(m) {
+  const codes = new Set();
+  m.fx.forEach((e) => (e.maps || []).forEach((c) => codes.add(c)));
+  const opts = [...codes].sort((a, b) => mapLabel(a).localeCompare(mapLabel(b)));
+  const sel = $("#mapSel");
+  sel.innerHTML =
+    `<option value="all">All maps</option>` +
+    `<option value="global">Global (no restriction)</option>` +
+    opts.map((c) => `<option value="${c}">${mapLabel(c)}</option>`).join("");
+  sel.addEventListener("change", () => {
+    FILTER.map = sel.value;
+    renderGrid();
+  });
+}
+
 $("#search").addEventListener("input", (e) => {
   FILTER.q = e.target.value.trim().toLowerCase();
   $("#searchWrap").classList.toggle("has-text", !!FILTER.q);
@@ -108,6 +135,11 @@ $("#aboutOverlay").addEventListener("click", (e) => {
 function fxMatches(e) {
   if (FILTER.cls !== "all" && e.class !== FILTER.cls) return false;
   if (FILTER.onlyLive && e.tier === 3) return false;
+  if (FILTER.map === "global") {
+    if (e.maps && e.maps.length) return false;
+  } else if (FILTER.map !== "all") {
+    if (e.maps && e.maps.length && !e.maps.includes(FILTER.map)) return false;
+  }
   if (FILTER.q) {
     const hay = (
       e.name + " " + (e.maps || []).join(" ") + " " +
@@ -134,6 +166,8 @@ function renderGrid() {
     const mapsBadge = e.maps && e.maps.length
       ? `<span class="badge maps" title="${e.maps.join(", ")}">${e.maps.length} map${e.maps.length > 1 ? "s" : ""}</span>`
       : `<span class="badge maps" title="No level restriction">all maps</span>`;
+    const sndBadge = (e.sounds_ref || []).some((s) => s.clip)
+      ? `<span class="badge snd" title="Linked SFX Library clip">♪</span>` : "";
     card.innerHTML = `
       <div class="card-thumb"><span class="thumb-ico">${CLASS_ICON[e.class] || "✦"}</span>
         <div class="card-play"><span>${e.tier === 3 ? "ℹ" : "▶"}</span></div>
@@ -143,7 +177,7 @@ function renderGrid() {
         <div class="card-meta">
           <span class="badge tier${e.tier}" title="${TIER_TITLE[e.tier]}">${TIER_LABEL[e.tier]}</span>
           <span class="badge cls-${e.class}">${e.class}</span>
-          ${mapsBadge}
+          ${mapsBadge}${sndBadge}
         </div>
       </div>`;
     card.addEventListener("click", () => openPlayer(e));
@@ -181,6 +215,38 @@ function onThumbVisible(entries) {
   });
 }
 
+/* decoded linear-RGB param color -> css/display sRGB triple (0..255) */
+function linToSrgb(x) {
+  x = Math.max(0, Math.min(1, x));
+  return x <= 0.0031308 ? x * 12.92 : 1.055 * Math.pow(x, 1 / 2.4) - 0.055;
+}
+function paramColor(p, key) {
+  const v = p && p[key];
+  if (Array.isArray(v)) {
+    const m = Math.max(v[0], v[1], v[2]);
+    if (m <= 0) return [0, 0, 0];  // authored black tint (dark smoke cores)
+    const s = m > 1 ? 1 / m : 1;   // HDR emissive colors: normalize hue, clamp
+    return [linToSrgb(v[0] * s), linToSrgb(v[1] * s), linToSrgb(v[2] * s)];
+  }
+  if (typeof v === "number" && v > 0 && v !== 1)
+    return [linToSrgb(Math.min(v, 1)), linToSrgb(Math.min(v, 1)), linToSrgb(Math.min(v, 1))];
+  return null;
+}
+function emitterTintCss(em) {
+  const c = paramColor(em.params, "color1") || paramColor(em.params, "color0");
+  if (!c) return null;
+  return [Math.round(c[0] * 255), Math.round(c[1] * 255), Math.round(c[2] * 255)];
+}
+
+function renderModeFor(em) {
+  // decoded per-sheet render hint (see manifest _meta.evidence.blend);
+  // fall back to the old name heuristic for entries without a sprite
+  if (em.sprite && em.sprite.render) return em.sprite.render;
+  const n = (em.graph + " " + ((em.sprite && em.sprite.file) || "")).toLowerCase();
+  if (/fire|flame|ember|glow|muzzle|tracer|lava|molten/.test(n)) return "emissive";
+  return em.sprite && em.sprite.left_right_tiles ? "sixway" : "lit";
+}
+
 async function drawThumb(holder, e) {
   const em = e.emitters.find((m) => m.renderable && m.sprite);
   const cv = document.createElement("canvas");
@@ -191,16 +257,20 @@ async function drawThumb(holder, e) {
       const img = await loadImage(em.sprite.file);
       const fi = Math.floor(em.sprite.frames * 0.28);
       const [sx, sy, sw, sh] = spriteFrameRect(em.sprite, fi, img.width, img.height);
-      const isFire = blendModeFor(em) === "add";
-      if (isFire) ctx.globalCompositeOperation = "lighter";
+      const mode = renderModeFor(em);
+      if (mode === "emissive") ctx.globalCompositeOperation = "lighter";
       const s = Math.min(cv.width / sw, cv.height / sh) * 0.92;
       const dw = sw * s, dh = sh * s;
       ctx.drawImage(img, sx, sy, sw, sh,
         (cv.width - dw) / 2, (cv.height - dh) / 2, dw, dh);
-      if (!isFire && em.sprite.left_right_tiles) {
-        // 6-way lighting base: flatten RGB weights to neutral smoke grey
+      if (mode !== "emissive" && em.sprite.left_right_tiles) {
+        // 6-way lighting base: flatten the RGB weights to the decoded tint
+        // (colored marker smokes) or neutral smoke grey
+        const t = emitterTintCss(em);
         ctx.globalCompositeOperation = "source-atop";
-        ctx.fillStyle = "rgba(178,182,190,0.82)";
+        ctx.fillStyle = t
+          ? `rgba(${t[0]},${t[1]},${t[2]},0.85)`
+          : "rgba(178,182,190,0.82)";
         ctx.fillRect(0, 0, cv.width, cv.height);
       }
     } catch (_e) { /* keep icon */ }
@@ -256,16 +326,21 @@ function drawMeshThumb(ctx, w, h) {
    ============================================================ */
 const Player = {
   gl: null, canvas: null, raf: 0, emitters: [], lastT: 0,
-  cam: { yaw: 0.5, pitch: 0.22, dist: 9, target: [0, 1.4, 0] },
+  cam: {
+    yaw: 0.5, pitch: 0.22, dist: 9, target: [0, 1.4, 0],
+    flying: false, flySpeed: 1,
+  },
+  frameSize: 10, stageR: 8, stageH: 6,
   progQuad: null, progGrid: null, progMesh: null,
-  quadVAO: null, gridVAO: null, gridN: 0, instBuf: null,
+  quadVAO: null, gridVAO: null, gridN: 0, boxVAO: null, boxBuf: null, boxN: 0,
+  instBuf: null,
   texCache: new Map(), glbCache: new Map(), running: false,
+  keys: {}, audio: null, replayBursts: true,
 };
 
-function blendModeFor(em) {
-  const n = (em.graph + " " + ((em.sprite && em.sprite.file) || "")).toLowerCase();
-  if (/fire|flame|ember|glow|muzzle|tracer|lava|molten/.test(n)) return "add";
-  return "alpha";
+function cubic(c, t) {
+  // decoded *OverLife / *Curve params: cubic envelope a*t^3+b*t^2+c*t+d
+  return ((c[0] * t + c[1]) * t + c[2]) * t + c[3];
 }
 
 function lookFor(em) {
@@ -275,7 +350,7 @@ function lookFor(em) {
   let cls;
   if (em.mesh) cls = cd.meshdebris;
   else if (!em.sprite) cls = cd.sparks;
-  else cls = blendModeFor(em) === "add" ? cd.globalsorting_fire : cd.globalsorting_smoke;
+  else cls = renderModeFor(em) === "emissive" ? cd.globalsorting_fire : cd.globalsorting_smoke;
   return { g, cls: cls || {} };
 }
 
@@ -288,9 +363,12 @@ function openPlayer(e) {
     `<span class="badge cls-${e.class}">${e.class}</span>` +
     `<span class="badge maps" title="${mapsTxt}">${e.maps && e.maps.length ? e.maps.length + " map" + (e.maps.length > 1 ? "s" : "") : "all maps"}</span>`;
   buildSidePanel(e);
+  buildSoundButton(e);
   const renderables = e.emitters.filter(
     (m) => m.renderable && (m.sprite || m.mesh || m.family === "sparks" ||
            m.family === "thindebris" || m.family === "pebbles"));
+  const anyBurst = renderables.some((m) => m.spawn_mode === "burst");
+  $("#replayWrap").hidden = !anyBurst;
   if (!renderables.length) {
     $("#playerPlaceholder").hidden = false;
     $("#phReason").textContent = placeholderReason(e);
@@ -309,6 +387,39 @@ function placeholderReason(e) {
   return "This family (screen effect / decal / distortion) runs on baked GPU compute shaders that cannot be re-simulated from data. An in-game capture is planned.";
 }
 
+/* ---- optional linked audio (clips stay hosted on the SFX Library) ---- */
+function stopAudio() {
+  if (Player.audio) {
+    Player.audio.pause();
+    Player.audio = null;
+  }
+  $("#soundBtn").classList.remove("on");
+}
+function buildSoundButton(e) {
+  const btn = $("#soundBtn");
+  stopAudio();
+  const match = (e.sounds_ref || []).find((s) => s.clip);
+  if (!match) {
+    btn.hidden = true;
+    return;
+  }
+  btn.hidden = false;
+  btn.title = "Play the linked SFX Library clip: " + match.sb_name;
+  btn.onclick = () => {
+    if (Player.audio) { stopAudio(); return; }
+    const a = new Audio(SB_URL + match.clip);
+    a.loop = !!match.loop;
+    a.volume = 0.7;
+    a.play().catch(() => {});
+    Player.audio = a;
+    btn.classList.add("on");
+    a.onended = () => { if (!a.loop) stopAudio(); };
+  };
+}
+$("#replayChk").addEventListener("change", (e) => {
+  Player.replayBursts = e.target.checked;
+});
+
 $("#playerClose").addEventListener("click", closePlayer);
 $("#playerOverlay").addEventListener("click", (e) => {
   if (e.target === $("#playerOverlay")) closePlayer();
@@ -318,9 +429,14 @@ document.addEventListener("keydown", (e) => {
     if (!$("#playerOverlay").hidden) closePlayer();
     else if (!$("#aboutOverlay").hidden) $("#aboutOverlay").hidden = true;
   }
+  if (!$("#playerOverlay").hidden) Player.keys[e.key.toLowerCase()] = true;
+});
+document.addEventListener("keyup", (e) => {
+  Player.keys[e.key.toLowerCase()] = false;
 });
 function closePlayer() {
   $("#playerOverlay").hidden = true;
+  stopAudio();
   stopPlayer();
 }
 
@@ -329,16 +445,30 @@ function fmt(v, d = 2) {
   if (v === null || v === undefined) return "—";
   return typeof v === "number" ? (+v.toFixed(d)).toString() : String(v);
 }
+function swatchFor(p, key) {
+  const c = paramColor(p, key);
+  if (!c) return null;
+  const css = `rgb(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)})`;
+  return `<span class="swatch" style="background:${css}"></span>`;
+}
+function colorRow(p) {
+  const s0 = swatchFor(p, "color0"), s1 = swatchFor(p, "color1");
+  if (!s0 && !s1) return "";
+  const v = p.color1 || p.color0;
+  const label = !Array.isArray(v) ? fmt(v)
+    : Math.max(v[0], v[1], v[2]) > 8
+      ? "HDR ×" + fmt(Math.max(v[0], v[1], v[2]), 0)
+      : v.slice(0, 3).map((x) => fmt(x, 2)).join(", ");
+  return `<div class="prow"><span class="k">tint</span><span class="v">${s0 || ""}${s1 || ""}${label}</span></div>`;
+}
 function buildSidePanel(e) {
   const rows = [];
   e.emitters.forEach((m) => {
     if (m.family === "dummy") return;
     const p = m.params || {};
-    const col = p.color1
-      ? `<span class="swatch" style="background:rgb(${Math.round(p.color1[0] * 255)},${Math.round(p.color1[1] * 255)},${Math.round(p.color1[2] * 255)})"></span>`
-      : "";
     const spr = m.sprite
-      ? `<div class="prow"><span class="k">flipbook</span><span class="v">${m.sprite.cols}×${m.sprite.rows} · ${m.sprite.frames}f${m.sprite.left_right_tiles ? " · 6-way" : ""}</span></div>`
+      ? `<div class="prow"><span class="k">flipbook</span><span class="v">${m.sprite.cols}×${m.sprite.rows} · ${m.sprite.frames}f${m.sprite.left_right_tiles ? " · 6-way" : ""}</span></div>` +
+        `<div class="prow"><span class="k">render</span><span class="v">${m.sprite.render || "—"}</span></div>`
       : "";
     const mesh = m.mesh
       ? `<div class="prow"><span class="k">mesh</span><span class="v hl">${m.mesh.mesh_name}</span></div>`
@@ -346,27 +476,43 @@ function buildSidePanel(e) {
     rows.push(`
       <div class="pcard">
         <h3>${m.graph}<span class="fam">${m.family}${m.from_child ? " · child" : ""}</span></h3>
-        <div class="prow"><span class="k">spawn</span><span class="v hl">${m.spawn_mode === "burst" ? "burst" : fmt(m.spawn_rate.value) + " /s"}${m.spawn_rate.source === "graph_default" ? " *" : ""}</span></div>
+        <div class="prow"><span class="k">spawn</span><span class="v hl">${m.spawn_mode === "burst" ? "burst × " + fmt(m.max_count, 0) : fmt(m.spawn_rate.value) + " /s"}${m.spawn_rate.source === "graph_default" && m.spawn_mode !== "burst" ? " *" : ""}</span></div>
         <div class="prow"><span class="k">lifetime</span><span class="v hl">${fmt(m.lifetime.value)} s</span></div>
         <div class="prow"><span class="k">max particles</span><span class="v">${fmt(m.max_count, 0)}</span></div>
+        ${p.basesize !== undefined ? `<div class="prow"><span class="k">base size</span><span class="v hl">${fmt(p.basesize)} m</span></div>` : ""}
+        ${p.spawnspeed !== undefined ? `<div class="prow"><span class="k">spawn speed</span><span class="v">${fmt(p.spawnspeed)} m/s</span></div>` : ""}
         ${p.drag !== undefined ? `<div class="prow"><span class="k">drag</span><span class="v">${fmt(p.drag)}</span></div>` : ""}
         ${p.windstrength !== undefined ? `<div class="prow"><span class="k">wind</span><span class="v">${fmt(p.windstrength)}</span></div>` : ""}
-        ${p.buoyancy !== undefined ? `<div class="prow"><span class="k">buoyancy</span><span class="v">${fmt(p.buoyancy)}</span></div>` : ""}
+        ${p.buoyancy !== undefined && p.buoyancy !== 0 ? `<div class="prow"><span class="k">buoyancy</span><span class="v">${fmt(p.buoyancy)}</span></div>` : ""}
         ${p.gravity !== undefined ? `<div class="prow"><span class="k">gravity</span><span class="v">${fmt(p.gravity)} m/s²</span></div>` : ""}
         ${p.restitution !== undefined ? `<div class="prow"><span class="k">bounce</span><span class="v">${fmt(p.restitution)}</span></div>` : ""}
         ${p.temperature !== undefined ? `<div class="prow"><span class="k">temperature</span><span class="v">${fmt(p.temperature)}</span></div>` : ""}
         ${p.opacity !== undefined ? `<div class="prow"><span class="k">opacity</span><span class="v">${fmt(p.opacity)}</span></div>` : ""}
-        ${p.color1 ? `<div class="prow"><span class="k">tint</span><span class="v">${col}${p.color1.slice(0, 3).map((x) => fmt(x, 2)).join(", ")}</span></div>` : ""}
+        ${p.emissiveintensitymult !== undefined ? `<div class="prow"><span class="k">emissive ×</span><span class="v">${fmt(Array.isArray(p.emissiveintensitymult) ? p.emissiveintensitymult[0] : p.emissiveintensitymult, 0)}</span></div>` : ""}
+        ${colorRow(p)}
+        ${m.n_overrides ? `<div class="prow"><span class="k">authored overrides</span><span class="v">${m.n_overrides}</span></div>` : ""}
         ${spr}${mesh}
+      </div>`);
+  });
+  (e.sounds_ref || []).forEach((s) => {
+    rows.push(`
+      <div class="pcard">
+        <h3>Sound<span class="fam">config</span></h3>
+        <div class="prow"><span class="k">config</span><span class="v">${s.config}</span></div>
+        ${s.clip
+          ? `<div class="prow"><span class="k">SFX Library</span><span class="v hl">${s.sb_name}</span></div>
+             <div class="prow"><span class="k">clip</span><span class="v">${fmt(s.dur, 1)} s${s.loop ? " · loop" : ""}</span></div>`
+          : `<div class="prow"><span class="k">SFX Library</span><span class="v">no matching clip</span></div>`}
       </div>`);
   });
   if (!rows.length) rows.push(`<div class="pcard"><h3>No emitter data</h3>
     <div class="pnote">${placeholderReason(e)}</div></div>`);
   rows.push(`<div class="pcard"><div class="pnote">Values decoded from the game's
-    effect blueprints and emitter-graph templates. * = template default (no
-    per-effect override). Flipbook playback speed and particle size are baked
-    into compiled shaders &mdash; the player derives them (frames spread over the
-    particle lifetime; sizes from editor_fx_params.json class defaults).</div></div>`);
+    effect blueprints, emitter-graph templates and per-emitter override tables.
+    * = template default (no per-effect override). Tints are the decoded
+    Color0/Color1 pair (linear RGB). Flipbook playback speed is baked into
+    compiled shaders &mdash; the player spreads frames over the particle
+    lifetime.</div></div>`);
   $("#playerEmitters").innerHTML = rows.join("");
 }
 
@@ -375,13 +521,14 @@ const VS_QUAD = `#version 300 es
 layout(location=0) in vec2 corner;      // -0.5..0.5 unit quad
 layout(location=1) in vec4 iPosSize;    // xyz world pos, w size
 layout(location=2) in vec4 iMisc;       // frame, alpha, rot, stretch
-layout(location=3) in vec3 iVel;        // for streak orientation
+layout(location=3) in vec4 iVelU;       // xyz velocity (streaks), w life frac
 uniform mat4 uVP;
 uniform vec3 uCamRight, uCamUp;
 uniform vec2 uGrid;                     // cols, rows
 uniform float uStreak;                  // 0 = billboard, 1 = velocity streak
 out vec2 vUV;
 out float vAlpha;
+out float vU;
 void main(){
   float frame = floor(iMisc.x);
   float c = mod(frame, uGrid.x);
@@ -393,7 +540,7 @@ void main(){
   corn = R * corn;
   vec3 right, up, wp;
   if (uStreak > 0.5) {
-    vec3 dir = normalize(iVel + vec3(0.0001));
+    vec3 dir = normalize(iVelU.xyz + vec3(0.0001));
     right = dir * (iMisc.w * iPosSize.w);
     up = normalize(cross(dir, vec3(0.12,0.93,0.35))) * iPosSize.w * 0.08;
     wp = iPosSize.xyz + right*corn.x + up*corn.y;
@@ -405,34 +552,38 @@ void main(){
   gl_Position = uVP * vec4(wp, 1.0);
   vUV = (vec2(c, r) + corner + 0.5) * cell;
   vAlpha = iMisc.y;
+  vU = iVelU.w;
 }`;
 
 const FS_QUAD = `#version 300 es
 precision mediump float;
 in vec2 vUV;
 in float vAlpha;
+in float vU;
 uniform sampler2D uTex;
-uniform int uMode;        // 0 additive-sprite, 1 smoke-alpha, 2 smoke-6way, 3 solid streak
-uniform vec4 uTint;
+uniform int uMode;        // 0 emissive-additive, 1 lit-alpha, 2 sixway, 3 streak
+uniform vec4 uTint0;      // decoded Color0 (display sRGB)
+uniform vec4 uTint1;      // decoded Color1 (display sRGB)
 uniform vec3 uLightDir;   // weights for the 6-way lighting base
 out vec4 frag;
 void main(){
+  vec4 tint = mix(uTint0, uTint1, clamp(vU, 0.0, 1.0));
   if (uMode == 3) {
     float core = 1.0 - abs(vUV.y*2.0-1.0);
-    frag = vec4(uTint.rgb * core * vAlpha, 0.0);
+    frag = vec4(tint.rgb * core * vAlpha, 0.0);
     return;
   }
   vec4 t = texture(uTex, vUV);
   if (uMode == 0) {
-    frag = vec4(t.rgb * uTint.rgb * (t.a * vAlpha * uTint.a), 0.0);
+    frag = vec4(t.rgb * tint.rgb * (t.a * vAlpha * tint.a), 0.0);
   } else if (uMode == 2) {
     float lit = clamp(dot(t.rgb, uLightDir) * 1.55 + 0.14, 0.0, 1.3);
-    vec3 col = uTint.rgb * lit;
-    float a = t.a * vAlpha * uTint.a;
+    vec3 col = tint.rgb * lit;
+    float a = t.a * vAlpha * tint.a;
     frag = vec4(col * a, a);
   } else {
-    float a = t.a * vAlpha * uTint.a;
-    frag = vec4(t.rgb * uTint.rgb * a, a);
+    float a = t.a * vAlpha * tint.a;
+    frag = vec4(t.rgb * tint.rgb * a, a);
   }
 }`;
 
@@ -466,16 +617,23 @@ void main(){
   frag = vec4(col, 1.0);
 }`;
 
+/* stage: floor grid + viewing-box lines (same dark-stage presentation as the
+   Model Library viewer). p.xyz = line vertex, fade by distance from centre. */
 const VS_GRID = `#version 300 es
 layout(location=0) in vec3 p;
 uniform mat4 uVP;
+uniform float uFadeR;
 out float vFade;
-void main(){ gl_Position = uVP * vec4(p,1.0); vFade = clamp(1.0 - length(p.xz)/14.0, 0.0, 1.0); }`;
+void main(){
+  gl_Position = uVP * vec4(p,1.0);
+  vFade = clamp(1.0 - length(p.xz)/uFadeR, 0.0, 1.0);
+}`;
 const FS_GRID = `#version 300 es
 precision mediump float;
 in float vFade;
+uniform vec4 uCol;
 out vec4 frag;
-void main(){ frag = vec4(1.0, 0.42, 0.10, 0.10 * vFade); }`;
+void main(){ frag = vec4(uCol.rgb, uCol.a * vFade); }`;
 
 function makeProg(gl, vs, fs) {
   const p = gl.createProgram();
@@ -496,7 +654,7 @@ function makeProg(gl, vs, fs) {
 function initGL() {
   if (Player.gl) return true;
   const canvas = $("#stage");
-  const gl = canvas.getContext("webgl2", { alpha: true, antialias: true, premultipliedAlpha: true });
+  const gl = canvas.getContext("webgl2", { alpha: false, antialias: true, premultipliedAlpha: true });
   if (!gl) return false;
   Player.gl = gl;
   Player.canvas = canvas;
@@ -513,17 +671,21 @@ function initGL() {
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   Player.instBuf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, Player.instBuf);
-  const stride = 11 * 4;
-  for (const [loc, n, off] of [[1, 4, 0], [2, 4, 16], [3, 3, 32]]) {
+  const stride = 12 * 4;
+  for (const [loc, n, off] of [[1, 4, 0], [2, 4, 16], [3, 4, 32]]) {
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, n, gl.FLOAT, false, stride, off);
     gl.vertexAttribDivisor(loc, 1);
   }
   Player.quadVAO = vao;
-  const lines = [];
-  for (let i = -12; i <= 12; i++) {
-    lines.push(i, 0, -12, i, 0, 12, -12, 0, i, 12, 0, i);
+
+  // floor grid: 1 m minor lines over an 80 m square (fade radius set per FX)
+  const minor = [], major = [];
+  for (let i = -40; i <= 40; i++) {
+    (i % 5 === 0 ? major : minor).push(i, 0, -40, i, 0, 40, -40, 0, i, 40, 0, i);
   }
+  const lines = minor.concat(major);
+  Player.gridMinorN = minor.length / 3;
   const gvao = gl.createVertexArray();
   gl.bindVertexArray(gvao);
   const gb = gl.createBuffer();
@@ -533,9 +695,35 @@ function initGL() {
   gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
   Player.gridVAO = gvao;
   Player.gridN = lines.length / 3;
+
+  // viewing box (rebuilt per effect to the stage bounds)
+  const bvao = gl.createVertexArray();
+  gl.bindVertexArray(bvao);
+  Player.boxBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, Player.boxBuf);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+  Player.boxVAO = bvao;
   gl.bindVertexArray(null);
-  bindOrbit(canvas);
+  bindControls(canvas);
   return true;
+}
+
+function buildStageBox(r, h) {
+  const gl = Player.gl;
+  const v = [];
+  const c = [[-r, -r], [r, -r], [r, r], [-r, r]];
+  for (let i = 0; i < 4; i++) {
+    const [x, z] = c[i], [x2, z2] = c[(i + 1) % 4];
+    v.push(x, 0, z, x, h, z);          // corner posts
+    v.push(x, h, z, x2, h, z2);        // top frame
+    v.push(x, 0, z, x2, 0, z2);        // floor frame
+  }
+  gl.bindBuffer(gl.ARRAY_BUFFER, Player.boxBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(v), gl.DYNAMIC_DRAW);
+  Player.boxN = v.length / 3;
+  Player.stageR = r;
+  Player.stageH = h;
 }
 
 function getTexture(file) {
@@ -660,13 +848,25 @@ function blackbody(temp) {
   return [1.0, 0.38 + 0.55 * t, 0.08 + 0.72 * t * t];
 }
 
+function tintVec(p, key, fallback) {
+  const c = paramColor(p, key);
+  if (!c) return fallback;
+  return [c[0], c[1], c[2], 1];
+}
+
+function num(v, dflt) {
+  if (typeof v === "number") return v;
+  if (Array.isArray(v)) return v[0];
+  return dflt;
+}
+
 function makeEmitterRuntime(em, idx) {
   const p = em.params || {};
   const { g, cls } = lookFor(em);
   const rate = em.spawn_rate.value || 1;
   const life = em.lifetime.value || 2;
   const maxN = Math.min(em.max_count || 64, 4000);
-  const burst = em.spawn_mode === "burst" || rate * life > maxN * 1.5;
+  const burst = em.spawn_mode === "burst" || rate * life > maxN * 2.5;
   const bbox = em.bbox || [[-0.5, 0, -0.5], [0.5, 1, 0.5]];
   const ext = [
     Math.abs(bbox[1][0] - bbox[0][0]),
@@ -676,33 +876,58 @@ function makeEmitterRuntime(em, idx) {
   const meanExt = (ext[0] + ext[1] + ext[2]) / 3;
   const isSpark = !em.sprite && !em.mesh;
   const isMesh = !!em.mesh;
+  const render = renderModeFor(em);
   const mode = isMesh ? 4 : isSpark ? 3
-    : blendModeFor(em) === "add" ? 0
-    : em.sprite.left_right_tiles ? 2 : 1;
-  // size: class default scaled by the authored emitter extent
-  const extScale = Math.min(Math.max(meanExt / 2.5, 0.55), 2.6);
-  const s0 = (cls.size_min ?? 0.6) * extScale;
-  const s1 = (cls.size_max ?? 1.2) * extScale;
-  const tint = p.color1 ? p.color1.slice(0, 4) : [1, 1, 1, 1];
-  if (p.opacity !== undefined) tint[3] = (tint[3] ?? 1) * p.opacity;
-  const sparkCol = blackbody(p.temperature !== undefined ? p.temperature : 0.5);
+    : render === "emissive" ? 0
+    : render === "sixway" ? 2 : 1;
+  // size: decoded BaseSize (meters) when authored, class default otherwise
+  const baseSize = num(p.basesize, null);
+  let s0, s1;
+  if (baseSize !== null && baseSize > 0) {
+    s0 = baseSize * 0.85;
+    s1 = baseSize * 1.15;
+  } else {
+    const extScale = Math.min(Math.max(meanExt / 2.5, 0.55), 2.6);
+    s0 = (cls.size_min ?? 0.6) * extScale;
+    s1 = (cls.size_max ?? 1.2) * extScale;
+  }
+  // decoded colors (linear RGB, converted for display); Color0 -> Color1
+  // over particle life. Sparks fall back to the blackbody Temperature tint.
+  const sparkCol = blackbody(p.temperature !== undefined ? num(p.temperature, 0.5) : 0.5);
+  const white = [1, 1, 1, 1];
+  let tint0 = tintVec(p, "color0", null);
+  let tint1 = tintVec(p, "color1", null);
+  if (!tint0 && !tint1) { tint0 = white; tint1 = white; }
+  else if (!tint0) tint0 = tint1;
+  else if (!tint1) tint1 = tint0;
+  if (mode === 3) tint0 = tint1 = [...sparkCol, 1];
+  const op = p.opacity !== undefined ? num(p.opacity, 1) : 1;
+  tint0 = [...tint0]; tint1 = [...tint1];
+  tint0[3] = (tint0[3] ?? 1) * op;
+  tint1[3] = (tint1[3] ?? 1) * op;
   const fps = g.fps || (em.sprite ? em.sprite.frames / life : 0);
-  // single long-lived mesh (UAV, wreck piece) -> anchored turntable display,
-  // not falling debris
-  const meshDisplay = isMesh && maxN <= 2 && life >= 3;
+  // spawn velocity: decoded SpawnSpeed (m/s) when authored
+  const spawnSpeed = num(p.spawnspeed, null);
+  const spawnSpeedMin = num(p.spawnspeedmin, 0.7);
+  // long-lived meshes (UAV, birds, rats -- flight/flock sims are baked into
+  // compute shaders) -> anchored turntable display, not falling debris
+  const meshDisplay = isMesh && (life >= 100 || (maxN <= 2 && life >= 3));
   return {
     em, idx, rate, life, maxN, burst, bbox, mode, meshDisplay,
     s0, s1, grow: cls.grow ?? 1.6,
-    rise: (cls.rise_mps ?? 1.0) + (p.buoyancy || 0) * 0.6,
-    tint: mode === 3 ? [...sparkCol, 1] : tint,
-    drag: p.drag !== undefined ? p.drag : 0.3,
-    wind: (p.windstrength || 0) * 0.35,
-    gravity: p.gravity !== undefined ? p.gravity : (isSpark || isMesh ? -9.8 : 0),
-    restitution: p.restitution !== undefined ? p.restitution : 0.3,
-    speedMult: p.speedmult !== undefined ? Math.min(p.speedmult, 12) : (isSpark ? 5 : 2.5),
-    lifeMinMult: p.lifeminmult !== undefined ? p.lifeminmult : 0.8,
-    rotSpeed: (p.rotationspeed !== undefined ? p.rotationspeed : 10) * Math.PI / 180,
-    spawnRot: (p.spawnrot !== undefined ? p.spawnrot : 30) * Math.PI / 180,
+    sizeCurve: Array.isArray(p.sizecurve) ? p.sizecurve : null,
+    opCurve: Array.isArray(p.opacityoverlife) ? p.opacityoverlife : null,
+    rise: (cls.rise_mps ?? 1.0) + num(p.buoyancy, 0) * 0.6,
+    spawnSpeed, spawnSpeedMin,
+    tint0, tint1,
+    drag: p.drag !== undefined ? num(p.drag, 0.3) : 0.3,
+    wind: num(p.windstrength, 0) * 0.35,
+    gravity: p.gravity !== undefined ? num(p.gravity, -9.8) : (isSpark || isMesh ? -9.8 : 0),
+    restitution: p.restitution !== undefined ? num(p.restitution, 0.3) : 0.3,
+    speedMult: p.speedmult !== undefined ? Math.min(num(p.speedmult, 2.5), 12) : (isSpark ? 5 : 2.5),
+    lifeMinMult: p.lifeminmult !== undefined ? num(p.lifeminmult, 0.8) : 0.8,
+    rotSpeed: num(p.rotationspeed, 10) * Math.PI / 180,
+    spawnRot: num(p.spawnrot, 30) * Math.PI / 180,
     tumble: (cls.tumble_dps ?? 300) * Math.PI / 180,
     streakStretch: cls.streak_stretch ?? 4,
     grid: em.sprite ? [em.sprite.cols, em.sprite.rows] : [1, 1],
@@ -722,20 +947,32 @@ function spawnParticle(rt) {
   const py = rt.pos[1] + Math.max(b[0][1], 0) + (b[1][1] - b[0][1]) * r() * 0.15;
   const pz = rt.pos[2] + (b[0][2] + (b[1][2] - b[0][2]) * r()) * 0.35;
   if (rt.meshDisplay) {
+    if (rt.parts.length >= rt.maxN) return;          // permanent display row
+    const i = rt.parts.length;                       // spread a row
+    const off = (i % 2 ? 1 : -1) * Math.ceil(i / 2) * Math.max(rt.s1, 0.8);
     rt.parts.push({
-      x: rt.pos[0], y: Math.max(rt.pos[1], 1.6), z: rt.pos[2],
+      x: rt.pos[0] + off, y: Math.max(rt.pos[1], 1.6), z: rt.pos[2],
       vx: 0, vy: 0, vz: 0, age: 0, life: 1e9,
-      rot: 0.6, rotV: 0.35, ax: 0, ay: 1, az: 0, scl: 1,
+      rot: 0.6 + i, rotV: 0.35, ax: 0, ay: 1, az: 0, scl: 1,
     });
     return;
   }
   let vx, vy, vz;
   if (rt.mode === 3 || rt.mode === 4) {
     const a = r() * Math.PI * 2;
-    const v = rt.speedMult * (0.35 + r() * 0.65);
+    const base = rt.spawnSpeed !== null && rt.spawnSpeed > 0 ? rt.spawnSpeed : rt.speedMult;
+    const v = base * (rt.spawnSpeedMin + (1 - rt.spawnSpeedMin) * r());
     vx = Math.cos(a) * v * (0.4 + r() * 0.6);
     vy = v * (0.5 + r() * 0.8);
     vz = Math.sin(a) * v * (0.4 + r() * 0.6);
+  } else if (rt.spawnSpeed !== null && rt.spawnSpeed > 0) {
+    // decoded initial speed, up-biased cone (authored direction is baked)
+    const a = r() * Math.PI * 2;
+    const v = rt.spawnSpeed * (rt.spawnSpeedMin + (1 - rt.spawnSpeedMin) * r());
+    const lat = 0.25 + r() * 0.2;
+    vx = Math.cos(a) * v * lat;
+    vy = v * (0.8 + r() * 0.25);
+    vz = Math.sin(a) * v * lat;
   } else {
     vx = (r() - 0.5) * 0.5;
     vy = rt.rise * (0.75 + r() * 0.5);
@@ -756,7 +993,8 @@ function stepEmitter(rt, dt) {
   if (rt.burst) {
     rt.cycleT += dt;
     const period = rt.life * 1.35 + 0.6;
-    if (rt.cycleT >= period || (rt.cycleT === dt && !rt.parts.length)) {
+    const first = rt.cycleT === dt && !rt.parts.length;
+    if (first || (Player.replayBursts && rt.cycleT >= period)) {
       rt.cycleT = 0.0001;
       const n = Math.min(rt.maxN, 600);
       for (let i = 0; i < n; i++) spawnParticle(rt);
@@ -773,11 +1011,15 @@ function stepEmitter(rt, dt) {
   const g = rt.gravity;
   const windX = rt.wind, windZ = rt.wind * 0.4;
   const grounded = (rt.mode === 3 || rt.mode === 4) && !rt.meshDisplay;
+  // billboards with a decoded spawn speed keep a gentle buoyant assist so
+  // plumes don't stall once drag eats the initial speed (baked-sim drift)
+  const lift = (rt.mode <= 2 && rt.spawnSpeed !== null) ? rt.rise * 0.3 : 0;
   for (let i = rt.parts.length - 1; i >= 0; i--) {
     const p = rt.parts[i];
     p.age += dt;
     if (p.age >= p.life) { rt.parts.splice(i, 1); continue; }
     if (grounded) p.vy += g * dt;
+    if (lift) p.vy += lift * (1 - p.age / p.life) * dt;   // buoyancy decays
     p.vx += windX * dt;
     p.vz += windZ * dt;
     const dr = Math.max(0, 1 - drag * dt);
@@ -792,24 +1034,136 @@ function stepEmitter(rt, dt) {
   }
 }
 
-/* ---- camera ---- */
-function bindOrbit(canvas) {
-  let drag = false, lx = 0, ly = 0;
+/* ---- camera: orbit + dolly + pan, RMB freelook + WASD fly ----
+   (control scheme mirrors the Model Library inspector) */
+function camDir() {
+  const c = Player.cam;
+  return [
+    Math.cos(c.pitch) * Math.sin(c.yaw),
+    Math.sin(c.pitch),
+    Math.cos(c.pitch) * Math.cos(c.yaw),
+  ];
+}
+function camEye() {
+  const c = Player.cam, d = camDir();
+  return [c.target[0] + c.dist * d[0], c.target[1] + c.dist * d[1], c.target[2] + c.dist * d[2]];
+}
+
+function bindControls(canvas) {
+  const c = Player.cam;
+  let mode = null;           // "orbit" | "pan" | "fly"
+  let lx = 0, ly = 0;
+  canvas.addEventListener("contextmenu", (e) => e.preventDefault());
   canvas.addEventListener("pointerdown", (e) => {
-    drag = true; lx = e.clientX; ly = e.clientY;
+    lx = e.clientX; ly = e.clientY;
+    if (e.button === 2) {
+      mode = "fly";
+      c.flying = true;
+      canvas.classList.add("flying");
+    } else if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+      mode = "pan";
+    } else if (e.button === 0) {
+      mode = "orbit";
+    }
     canvas.setPointerCapture(e.pointerId);
+    e.preventDefault();
   });
   canvas.addEventListener("pointermove", (e) => {
-    if (!drag) return;
-    Player.cam.yaw -= (e.clientX - lx) * 0.008;
-    Player.cam.pitch = Math.min(1.35, Math.max(-0.15, Player.cam.pitch + (e.clientY - ly) * 0.006));
+    if (!mode) return;
+    const dx = e.clientX - lx, dy = e.clientY - ly;
     lx = e.clientX; ly = e.clientY;
+    if (mode === "orbit") {
+      c.yaw -= dx * 0.008;
+      c.pitch = Math.min(1.5, Math.max(-0.35, c.pitch + dy * 0.006));
+    } else if (mode === "pan") {
+      const d = camDir();
+      const f = [-d[0], -d[1], -d[2]];              // view forward
+      const s = [-f[2], 0, f[0]];                   // screen right
+      const sl = Math.hypot(...s) || 1;
+      s[0] /= sl; s[2] /= sl;
+      const u = [                                    // screen up = s x f
+        s[1] * f[2] - s[2] * f[1],
+        s[2] * f[0] - s[0] * f[2],
+        s[0] * f[1] - s[1] * f[0],
+      ];
+      const k = c.dist * 0.0016;
+      // grabby pan: the scene follows the cursor
+      c.target[0] += -s[0] * dx * k + u[0] * dy * k;
+      c.target[1] += -s[1] * dx * k + u[1] * dy * k;
+      c.target[2] += -s[2] * dx * k + u[2] * dy * k;
+    } else if (mode === "fly") {
+      // freelook: rotate around the EYE (keep it fixed, move the target)
+      const eye = camEye();
+      c.yaw -= dx * 0.0032;
+      c.pitch = Math.min(1.5, Math.max(-1.5, c.pitch + dy * 0.0032));
+      const d = camDir();
+      c.target = [eye[0] - c.dist * d[0], eye[1] - c.dist * d[1], eye[2] - c.dist * d[2]];
+    }
   });
-  canvas.addEventListener("pointerup", () => (drag = false));
+  const endPointer = (e) => {
+    if (mode === "fly") {
+      // re-anchor the orbit pivot straight ahead (a stale pivot left behind
+      // by freelook otherwise snaps the camera on the next orbit/zoom)
+      const eye = camEye();
+      const nd = Math.max(Player.frameSize * 0.4, 1);
+      const d = camDir();
+      c.dist = nd;
+      c.target = [eye[0] - nd * d[0], eye[1] - nd * d[1], eye[2] - nd * d[2]];
+      c.flying = false;
+      canvas.classList.remove("flying");
+    }
+    mode = null;
+  };
+  canvas.addEventListener("pointerup", endPointer);
+  canvas.addEventListener("pointercancel", endPointer);
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
-    Player.cam.dist = Math.min(80, Math.max(2.0, Player.cam.dist * (e.deltaY > 0 ? 1.12 : 0.89)));
+    if (c.flying) {
+      c.flySpeed = Math.max(0.05, Math.min(30, c.flySpeed * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+      flashHint(`fly speed ×${c.flySpeed.toFixed(2)}`);
+      return;
+    }
+    // proportional dolly: one 120 px notch = ~4% of the current distance,
+    // smooth-scroll bursts of tiny deltas sum to the same travel
+    const px = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+    const k = Math.pow(0.96, Math.max(-6, Math.min(6, -px / 120)));
+    c.dist = Math.max(Player.frameSize * 0.02,
+      Math.min(Player.frameSize * 12, c.dist * k));
   }, { passive: false });
+}
+
+let hintTimer = 0;
+function flashHint(msg) {
+  const el = $("#playerHint");
+  el.dataset.base = el.dataset.base || el.textContent;
+  el.textContent = msg;
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(() => { el.textContent = el.dataset.base; }, 900);
+}
+
+function flyStep(dt) {
+  const c = Player.cam;
+  if (!c.flying) return;
+  const k = Player.keys;
+  const sp = Player.frameSize * 0.6 * c.flySpeed * (k["shift"] ? 3 : 1) * dt;
+  const d = camDir();
+  const fwd = [-d[0], -d[1], -d[2]];
+  const right = [-fwd[2], 0, fwd[0]];   // screen right (fwd x worldUp)
+  const rl = Math.hypot(...right) || 1;
+  right[0] /= rl; right[2] /= rl;
+  const mv = [0, 0, 0];
+  if (k["w"]) { mv[0] += fwd[0]; mv[1] += fwd[1]; mv[2] += fwd[2]; }
+  if (k["s"]) { mv[0] -= fwd[0]; mv[1] -= fwd[1]; mv[2] -= fwd[2]; }
+  if (k["d"]) { mv[0] += right[0]; mv[2] += right[2]; }
+  if (k["a"]) { mv[0] -= right[0]; mv[2] -= right[2]; }
+  if (k["e"]) mv[1] += 1;
+  if (k["q"]) mv[1] -= 1;
+  const l = Math.hypot(...mv);
+  if (l > 0) {
+    c.target[0] += mv[0] / l * sp;
+    c.target[1] += mv[1] / l * sp;
+    c.target[2] += mv[2] / l * sp;
+  }
 }
 
 function mat4Multiply(a, b) {
@@ -822,13 +1176,13 @@ function mat4Multiply(a, b) {
 
 function camMatrices(w, h) {
   const c = Player.cam;
-  const cx = c.target[0] + c.dist * Math.cos(c.pitch) * Math.sin(c.yaw);
-  const cy = c.target[1] + c.dist * Math.sin(c.pitch);
-  const cz = c.target[2] + c.dist * Math.cos(c.pitch) * Math.cos(c.yaw);
-  const eye = [cx, cy, cz];
-  let f = [c.target[0] - cx, c.target[1] - cy, c.target[2] - cz];
-  const fl = Math.hypot(...f); f = f.map((v) => v / fl);
-  let s = [f[2], 0, -f[0]];
+  const eye = camEye();
+  let f = [c.target[0] - eye[0], c.target[1] - eye[1], c.target[2] - eye[2]];
+  const fl = Math.hypot(...f) || 1; f = f.map((v) => v / fl);
+  // s = f x worldUp (true screen right). The previous player used the
+  // negation, which rendered the whole stage rotated 180° about the view
+  // axis (rising smoke drifted DOWN on screen).
+  let s = [-f[2], 0, f[0]];
   const sl = Math.hypot(...s) || 1; s = s.map((v) => v / sl);
   const u = [s[1] * f[2] - s[2] * f[1], s[2] * f[0] - s[0] * f[2], s[0] * f[1] - s[1] * f[0]];
   const view = new Float32Array([
@@ -839,7 +1193,7 @@ function camMatrices(w, h) {
     -(u[0] * eye[0] + u[1] * eye[1] + u[2] * eye[2]),
     (f[0] * eye[0] + f[1] * eye[1] + f[2] * eye[2]), 1,
   ]);
-  const fov = 50 * Math.PI / 180, asp = w / h, near = 0.1, far = 400;
+  const fov = 50 * Math.PI / 180, asp = w / h, near = 0.05, far = 900;
   const t = 1 / Math.tan(fov / 2);
   const proj = new Float32Array([
     t / asp, 0, 0, 0,
@@ -867,24 +1221,35 @@ function startPlayer(renderables) {
         rt.glbReady = true;
         const r = glb.radius * rt.meshScale;
         if (rt.meshDisplay) {
+          // frame the anchored display row, not the (huge) authored bbox
           Player.cam.target = [rt.pos[0], Math.max(rt.pos[1], 1.6), rt.pos[2]];
-          Player.cam.dist = Math.max(Player.cam.dist, r * 2.4 + 1.5);
+          Player.cam.dist = Math.max(3, r * 2.4 + 1.5 + rt.maxN * rt.s1 * 0.5);
         } else {
           Player.cam.dist = Math.max(Player.cam.dist, r * 4 + 3);
         }
       }).catch(() => {});
     }
   });
+  // frame the effect: bounds from authored bboxes + decoded sizes + rise
   let top = 2, rad = 3;
   Player.emitters.forEach((rt) => {
     const b = rt.bbox;
-    top = Math.max(top, rt.pos[1] + b[1][1] * 0.6);
-    if (rt.mode === 1 || rt.mode === 2 || rt.mode === 0)
-      top = Math.max(top, rt.rise * Math.min(rt.life, 14) * 0.7);
-    rad = Math.max(rad, Math.abs(b[0][0]), Math.abs(b[1][0]), 2 + rt.s1 * 2, top * 0.6);
+    top = Math.max(top, rt.pos[1] + b[1][1] * 0.6 + rt.s1);
+    if (rt.mode <= 2) {
+      const v0 = rt.spawnSpeed !== null ? rt.spawnSpeed : rt.rise;
+      top = Math.max(top, v0 / Math.max(rt.drag, 0.25) * 0.8 + rt.s1);
+    }
+    rad = Math.max(rad, Math.abs(b[0][0]), Math.abs(b[1][0]), 2 + rt.s1 * 2, top * 0.55);
   });
-  Player.cam.target = [0, Math.min(top * 0.4, 7), 0];
-  Player.cam.dist = Math.min(Math.max(rad * 2.1, 5), 55);
+  top = Math.min(top, 30);
+  rad = Math.min(rad, 40);
+  Player.frameSize = Math.max(rad, top);
+  buildStageBox(Math.max(4, rad * 1.15), Math.max(3.5, top * 1.1));
+  Player.cam.yaw = 0.5;
+  Player.cam.pitch = 0.2;
+  Player.cam.flySpeed = 1;
+  Player.cam.target = [0, Math.min(top * 0.42, 8), 0];
+  Player.cam.dist = Math.min(Math.max(rad * 2.4, 5.5), 60);
   Player.lastT = performance.now();
   Player.emitters.forEach((rt) => {
     if (!rt.burst) for (let i = 0; i < 120; i++) stepEmitter(rt, rt.life / 100);
@@ -901,27 +1266,45 @@ function stopPlayer() {
   Player.emitters = [];
 }
 
+function drawStage(gl, vp) {
+  gl.useProgram(Player.progGrid);
+  const UG = (n) => gl.getUniformLocation(Player.progGrid, n);
+  gl.uniformMatrix4fv(UG("uVP"), false, vp);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.bindVertexArray(Player.gridVAO);
+  gl.uniform1f(UG("uFadeR"), Player.stageR * 2.4);
+  gl.uniform4fv(UG("uCol"), [0.28, 0.31, 0.35, 0.16]);        // minor lines
+  gl.drawArrays(gl.LINES, 0, Player.gridMinorN);
+  gl.uniform4fv(UG("uCol"), [0.36, 0.40, 0.45, 0.28]);        // major lines
+  gl.drawArrays(gl.LINES, Player.gridMinorN, Player.gridN - Player.gridMinorN);
+  // viewing box
+  gl.bindVertexArray(Player.boxVAO);
+  gl.bindBuffer(gl.ARRAY_BUFFER, Player.boxBuf);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+  gl.uniform1f(UG("uFadeR"), Player.stageR * 4.0);
+  gl.uniform4fv(UG("uCol"), [1.0, 0.42, 0.10, 0.16]);         // BF orange frame
+  gl.drawArrays(gl.LINES, 0, Player.boxN);
+}
+
 function tick(now) {
   if (!Player.running) return;
   const gl = Player.gl, canvas = Player.canvas;
   const dt = Math.min((now - Player.lastT) / 1000, 0.05);
   Player.lastT = now;
+  flyStep(dt);
   const w = canvas.clientWidth, h = canvas.clientHeight;
   if (canvas.width !== w * devicePixelRatio || canvas.height !== h * devicePixelRatio) {
     canvas.width = w * devicePixelRatio;
     canvas.height = h * devicePixelRatio;
   }
   gl.viewport(0, 0, canvas.width, canvas.height);
-  gl.clearColor(0, 0, 0, 0);
+  gl.clearColor(0.078, 0.086, 0.10, 1);   // dark stage (model-library style)
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   const { vp, right, up, eye, fwd } = camMatrices(w, h);
 
-  gl.useProgram(Player.progGrid);
-  gl.uniformMatrix4fv(gl.getUniformLocation(Player.progGrid, "uVP"), false, vp);
-  gl.bindVertexArray(Player.gridVAO);
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  gl.drawArrays(gl.LINES, 0, Player.gridN);
+  drawStage(gl, vp);
 
   // meshes first (opaque, depth), then alpha sprites, then additive
   for (const rt of Player.emitters) stepEmitter(rt, dt);
@@ -976,31 +1359,42 @@ function tick(now) {
         ((q.x - eye[0]) * fwd[0] + (q.y - eye[1]) * fwd[1] + (q.z - eye[2]) * fwd[2]) -
         ((p.x - eye[0]) * fwd[0] + (p.y - eye[1]) * fwd[1] + (p.z - eye[2]) * fwd[2]));
     }
-    const buf = new Float32Array(parts.length * 11);
+    const buf = new Float32Array(parts.length * 12);
     let o = 0;
     for (const p of parts) {
       const u = p.age / p.life;
-      const grow = rt.mode === 3 ? 1 : 1 + (rt.grow - 1) * u;
+      // size envelope: decoded SizeCurve cubic when authored, class grow otherwise
+      const grow = rt.mode === 3 ? 1
+        : rt.sizeCurve ? Math.max(cubic(rt.sizeCurve, u), 0.05)
+        : 1 + (rt.grow - 1) * u;
       const size = (rt.s0 + (rt.s1 - rt.s0) * (p.scl - 0.8) / 0.45) * grow;
-      const fadeIn = Math.min(u * 6, 1);
-      const fadeOut = rt.mode === 0 ? 1 - u * u : 1 - u;
-      const alpha = fadeIn * Math.max(fadeOut, 0);
+      // opacity envelope: decoded OpacityOverLife cubic when authored
+      let alpha;
+      if (rt.opCurve) {
+        alpha = Math.max(0, Math.min(cubic(rt.opCurve, u), 1));
+      } else {
+        const fadeIn = Math.min(u * 6, 1);
+        const fadeOut = rt.mode === 0 ? 1 - u * u : 1 - u;
+        alpha = fadeIn * Math.max(fadeOut, 0);
+      }
       const frame = rt.fps > 0
         ? (p.age * rt.fps) % rt.frames
         : Math.min(u * rt.frames, rt.frames - 0.001);
       const stretch = rt.mode === 3
         ? Math.min(rt.streakStretch + Math.hypot(p.vx, p.vy, p.vz) * 0.8, 10) : 0;
       buf[o++] = p.x; buf[o++] = p.y; buf[o++] = p.z;
-      buf[o++] = rt.mode === 3 ? 0.045 : size;
+      buf[o++] = rt.mode === 3 ? 0.06 : size;
       buf[o++] = frame; buf[o++] = alpha; buf[o++] = rt.mode === 3 ? 0 : p.rot;
       buf[o++] = stretch;
       buf[o++] = p.vx; buf[o++] = p.vy; buf[o++] = p.vz;
+      buf[o++] = u;
     }
     gl.bindVertexArray(Player.quadVAO);
     gl.bindBuffer(gl.ARRAY_BUFFER, Player.instBuf);
     gl.bufferData(gl.ARRAY_BUFFER, buf, gl.DYNAMIC_DRAW);
     gl.uniform1i(U("uMode"), rt.mode);
-    gl.uniform4fv(U("uTint"), rt.tint);
+    gl.uniform4fv(U("uTint0"), rt.tint0);
+    gl.uniform4fv(U("uTint1"), rt.tint1);
     gl.uniform2fv(U("uGrid"), rt.grid);
     gl.uniform1f(U("uStreak"), rt.mode === 3 ? 1 : 0);
     if (rt.tex) {
