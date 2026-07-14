@@ -2564,6 +2564,78 @@
    "six_way_lighting": true,
    "render": "sixway"
   },
+  "EG_GS_BasicSmoke_Portal": {
+   "graph": "EG_GS_BasicSmoke_Portal",
+   "family": "globalsorting",
+   "lifetime_s": 5.0,
+   "spawn": {
+    "mode": "continuous",
+    "rate": 1.0,
+    "max_count": 64,
+    "initial_count": 0
+   },
+   "drag": 0.3,
+   "wind_strength": 1.0,
+   "buoyancy": 0.0,
+   "spawn_speed": [
+    1.0,
+    1.0,
+    0.0,
+    0.0
+   ],
+   "rotation_speed_deg": 10.0,
+   "spawn_rot_deg": 30.0,
+   "life_min_mult": 0.5,
+   "opacity": 1.0,
+   "opacity_min_mult": 0.5,
+   "opacity_over_life": [
+    -1.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color0": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "base_size": 1.0,
+   "base_size_bias": 1.0,
+   "random_force": 0.1,
+   "slider_ranges": [
+    [
+     0.9998999834060669,
+     1.0,
+     false
+    ]
+   ],
+   "emitter_bbox": [
+    [
+     1.0,
+     1.0,
+     1.0
+    ],
+    [
+     -1.0,
+     -1.0,
+     -1.0
+    ]
+   ],
+   "sheet": "textures/t_clasticsmoke_tg1_01_d_8x64.png",
+   "cols": 8,
+   "rows": 8,
+   "frames": 64,
+   "fps": 12.8,
+   "six_way_lighting": true,
+   "render": "sixway"
+  },
   "EG_GS_StaticEmissive_Looping_01": {
    "graph": "EG_GS_StaticEmissive_Looping_01",
    "family": "globalsorting",
@@ -3025,6 +3097,52 @@
      0.10000000149011612,
      10.0,
      true
+    ]
+   ],
+   "emitter_bbox": [
+    [
+     20.0,
+     20.0,
+     20.0
+    ],
+    [
+     -20.0,
+     -20.0,
+     -20.0
+    ]
+   ]
+  },
+  "EG_Sparks_Cont_Vortex": {
+   "graph": "EG_Sparks_Cont_Vortex",
+   "family": "sparks",
+   "lifetime_s": 4.0,
+   "spawn": {
+    "mode": "continuous",
+    "rate": 200.0,
+    "max_count": 200,
+    "initial_count": 0
+   },
+   "drag": 0.3,
+   "wind_strength": 0.3,
+   "gravity": -9.81,
+   "restitution": 0.3,
+   "speed_mult": 20.0,
+   "turbulence_strength": 10.0,
+   "life_min_mult": 0.02,
+   "temperature": 0.5,
+   "intensity": 1.0,
+   "shrink_start_age": 0.8,
+   "turbulence_frequency": 0.1,
+   "slider_ranges": [
+    [
+     0.10000000149011612,
+     10.0,
+     true
+    ],
+    [
+     0.0,
+     1.0,
+     false
     ]
    ],
    "emitter_bbox": [
@@ -5901,6 +6019,93 @@
     ]
    ]
   },
+  "EG_Debris_Cont_ES_Terrain_vortex_1": {
+   "graph": "EG_Debris_Cont_ES_Terrain_vortex_1",
+   "family": "other",
+   "lifetime_s": 8.0,
+   "spawn": {
+    "mode": "continuous",
+    "rate": 200.0,
+    "max_count": 200,
+    "initial_count": 0
+   },
+   "drag": 0.3,
+   "wind_strength": 0.3,
+   "gravity": -9.81,
+   "restitution": 0.3,
+   "turbulence_strength": 10.0,
+   "life_min_mult": 0.8,
+   "spawn_rotation_speed": 720.0,
+   "turbulence_frequency": 0.1,
+   "slider_ranges": [
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.10000000149011612,
+     10.0,
+     true
+    ]
+   ],
+   "emitter_bbox": [
+    [
+     5.0,
+     5.0,
+     5.0
+    ],
+    [
+     -5.0,
+     -5.0,
+     -5.0
+    ]
+   ],
+   "mesh_ebx": "common/fx/emittergraph/thindebris/meshes/meshp_unitquad_thinmeshdebris_textured_es_mesh.ebx"
+  },
+  "EG_Prop_Destroy_Static_Simple": {
+   "graph": "EG_Prop_Destroy_Static_Simple",
+   "family": "other",
+   "lifetime_s": 5.0,
+   "spawn": {
+    "mode": "continuous",
+    "rate": 1.0,
+    "max_count": 64,
+    "initial_count": 0
+   },
+   "emitter_bbox": [
+    [
+     1.0,
+     1.0,
+     1.0
+    ],
+    [
+     -1.0,
+     -1.0,
+     -1.0
+    ]
+   ]
+  },
   "EG_Gadget_Claymore_Laser_Tripwire": {
    "graph": "EG_Gadget_Claymore_Laser_Tripwire",
    "family": "other",
@@ -6059,6 +6264,78 @@
     ]
    ],
    "mesh_ebx": "common/fx/emittergraph/_particletypes/meshp_defaulttriangle_zonly_es_mesh.ebx"
+  },
+  "EG_GS_BasicChunks_Impact_Sub": {
+   "graph": "EG_GS_BasicChunks_Impact_Sub",
+   "family": "other",
+   "lifetime_s": 5.0,
+   "spawn": {
+    "mode": "continuous",
+    "rate": 1.0,
+    "max_count": 64,
+    "initial_count": 0
+   },
+   "drag": 0.3,
+   "wind_strength": 1.0,
+   "gravity": -9.81,
+   "spawn_speed": [
+    1.0,
+    1.0,
+    0.0,
+    0.0
+   ],
+   "rotation_speed_deg": 10.0,
+   "spawn_rot_deg": 30.0,
+   "life_min_mult": 0.5,
+   "opacity": 1.0,
+   "opacity_min_mult": 0.5,
+   "opacity_over_life": [
+    -1.0,
+    0.0,
+    0.0,
+    1.0
+   ],
+   "color": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "color0": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+   ],
+   "base_size": 1.0,
+   "base_size_bias": 1.0,
+   "random_force": 0.1,
+   "slider_ranges": [
+    [
+     0.9998999834060669,
+     1.0,
+     false
+    ]
+   ],
+   "emitter_bbox": [
+    [
+     1.0,
+     1.0,
+     1.0
+    ],
+    [
+     -1.0,
+     -1.0,
+     -1.0
+    ]
+   ],
+   "sheet": "textures/t_debris_finedetail_03_d_1x1.png",
+   "cols": 1,
+   "rows": 1,
+   "frames": 1,
+   "fps": 0.2,
+   "six_way_lighting": false,
+   "render": "lit"
   },
   "EG_WireGuidedMissile_PosEventBroadcast": {
    "graph": "EG_WireGuidedMissile_PosEventBroadcast",
@@ -6429,6 +6706,253 @@
      -5.0,
      -5.0,
      -5.0
+    ]
+   ],
+   "mesh_ebx": "common/fx/emittergraph/thindebris/meshes/meshp_unitquad_thinmeshdebris_textured_es_mesh.ebx"
+  },
+  "EG_ThinDebris_Txtr_Cont_ES": {
+   "graph": "EG_ThinDebris_Txtr_Cont_ES",
+   "family": "thindebris",
+   "lifetime_s": 8.0,
+   "spawn": {
+    "mode": "continuous",
+    "rate": 200.0,
+    "max_count": 200,
+    "initial_count": 0
+   },
+   "drag": 0.3,
+   "wind_strength": 0.3,
+   "gravity": -9.81,
+   "restitution": 0.3,
+   "speed_mult": 20.0,
+   "turbulence_strength": 10.0,
+   "life_min_mult": 0.8,
+   "spawn_rotation_speed": 720.0,
+   "turbulence_frequency": 0.1,
+   "slider_ranges": [
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.10000000149011612,
+     10.0,
+     true
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ]
+   ],
+   "emitter_bbox": [
+    [
+     5.0,
+     5.0,
+     5.0
+    ],
+    [
+     -5.0,
+     -5.0,
+     -5.0
+    ]
+   ],
+   "mesh_ebx": "common/fx/emittergraph/thindebris/meshes/meshp_unitquad_thinmeshdebris_textured_es_mesh.ebx"
+  },
+  "EG_ThinDebris_Phys_Txtr_ES": {
+   "graph": "EG_ThinDebris_Phys_Txtr_ES",
+   "family": "thindebris",
+   "lifetime_s": 5.0,
+   "spawn": {
+    "mode": "continuous",
+    "rate": 1.0,
+    "max_count": 64,
+    "initial_count": 0
+   },
+   "restitution": 0.3,
+   "slider_ranges": [
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.0,
+     100.0,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.0,
+     5.0,
+     false
+    ],
+    [
+     0.009999999776482582,
+     5.0,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.0,
+     100.0,
+     false
+    ],
+    [
+     0.0,
+     20.0,
+     false
+    ],
+    [
+     0.0,
+     20.0,
+     false
+    ],
+    [
+     0.0,
+     20.0,
+     false
+    ],
+    [
+     0.0,
+     1000.0,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     -5.0,
+     5.0,
+     false
+    ],
+    [
+     0.0,
+     100.0,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.0,
+     20.0,
+     false
+    ],
+    [
+     0.0,
+     10.0,
+     false
+    ],
+    [
+     0.0,
+     5.0,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.0,
+     5.0,
+     false
+    ],
+    [
+     0.0,
+     100.0,
+     false
+    ],
+    [
+     0.0,
+     100.0,
+     false
+    ],
+    [
+     0.0,
+     0.5,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.0,
+     500.0,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.009999999776482582,
+     5.0,
+     false
+    ],
+    [
+     0.0,
+     5.0,
+     false
+    ],
+    [
+     0.0,
+     0.10000000149011612,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.0,
+     20.0,
+     false
+    ]
+   ],
+   "emitter_bbox": [
+    [
+     100.0,
+     100.0,
+     100.0
+    ],
+    [
+     -1.0,
+     -1.0,
+     -1.0
     ]
    ],
    "mesh_ebx": "common/fx/emittergraph/thindebris/meshes/meshp_unitquad_thinmeshdebris_textured_es_mesh.ebx"
@@ -6971,6 +7495,61 @@
      0.10000000149011612,
      10.0,
      true
+    ]
+   ],
+   "emitter_bbox": [
+    [
+     10.0,
+     10.0,
+     10.0
+    ],
+    [
+     -10.0,
+     -10.0,
+     -10.0
+    ]
+   ]
+  },
+  "EG_Sand_Frustrum_Quad_ES_MainDefault": {
+   "graph": "EG_Sand_Frustrum_Quad_ES_MainDefault",
+   "family": "sand",
+   "lifetime_s": 8.0,
+   "spawn": {
+    "mode": "continuous",
+    "rate": 200.0,
+    "max_count": 200,
+    "initial_count": 1
+   },
+   "drag": 0.3,
+   "wind_strength": 0.3,
+   "gravity": -9.81,
+   "restitution": 0.3,
+   "turbulence_strength": 10.0,
+   "life_min_mult": 0.8,
+   "spawn_rotation_speed": 3600.0,
+   "fade_in_speed": 100000.0,
+   "fade_start_age": 0.8,
+   "turbulence_frequency": 0.1,
+   "slider_ranges": [
+    [
+     0.10000000149011612,
+     10.0,
+     true
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
+    ],
+    [
+     0.0,
+     1.0,
+     false
     ]
    ],
    "emitter_bbox": [

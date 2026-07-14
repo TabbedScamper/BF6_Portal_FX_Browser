@@ -309,29 +309,64 @@ def portal_fx_list():
     return sorted((n, sorted(m)) for n, m in names.items())
 
 
-def resolve_blueprint(portal_name, name_idx, gi):
+def _bp_from_wrapper(wrapper_path, name_idx, gi):
+    """modbuilder wrapper -> on-disk fx_* blueprint path (via imports)."""
+    try:
+        f = ebxmod.parse(wrapper_path)
+    except Exception:
+        return None
+    cands = []
+    for im in f.imports:
+        p = gi.get(im[2]) or ""
+        b = os.path.basename(p).lower()
+        if b.startswith(("fx_", "ve_")) and "glacierportal" not in p.lower():
+            cands.append(p)
+    if not cands:
+        return None
+    cands.sort(key=lambda p: (0 if p.lower().startswith("common") else 1, len(p)))
+    return find_dump_file(cands[0], name_idx)
+
+
+def resolve_blueprint(portal_name, name_idx, gi, portal_keys=frozenset()):
     """Portal FX name -> (effect blueprint path, how)."""
     key = portal_name.lower()
     wrapper = name_idx.get("modbuilder_" + key)
     if wrapper:
-        try:
-            f = ebxmod.parse(wrapper[0])
-            cands = []
-            for im in f.imports:
-                p = gi.get(im[2]) or ""
-                b = os.path.basename(p).lower()
-                if b.startswith(("fx_", "ve_")) and "glacierportal" not in p.lower():
-                    cands.append(p)
-            if cands:
-                cands.sort(key=lambda p: (0 if p.lower().startswith("common") else 1, len(p)))
-                got = find_dump_file(cands[0], name_idx)
-                if got:
-                    return got, "wrapper"
-        except Exception:
-            pass
+        got = _bp_from_wrapper(wrapper[0], name_idx, gi)
+        if got:
+            return got, "wrapper"
     direct = name_idx.get(key)
     if direct:
         return direct[0], "direct"
+    # fuzzy wrapper fallback: some authored wrapper names differ from the
+    # Portal enum by an extra size/family suffix (fallingdust -> _m,
+    # marketstalltarp_blue_m -> _gs), an inserted map prefix
+    # (fx_snow_... -> fx_mp_aftermath_s01b1_snow_...) or a data-side typo
+    # (suction -> "sucktion"). Candidates that are the exact wrapper of a
+    # DIFFERENT catalog FX are excluded, and the match is flagged "fuzzy".
+    rest = key[3:] if key.startswith("fx_") else key
+    cands = []
+    for k in name_idx:
+        if not k.startswith("modbuilder_fx"):
+            continue
+        base = k[len("modbuilder_"):]
+        if base in portal_keys and base != key:
+            continue
+        if base.startswith(key + "_") or \
+                (len(rest) >= 10 and base.endswith("_" + rest)):
+            cands.append(k)
+    if not cands:
+        import difflib
+        pool = [k for k in name_idx if k.startswith("modbuilder_fx_")]
+        near = difflib.get_close_matches("modbuilder_" + key, pool,
+                                         n=2, cutoff=0.92)
+        cands = [k for k in near
+                 if k[len("modbuilder_"):] not in portal_keys]
+    if cands:
+        cands.sort(key=len)
+        got = _bp_from_wrapper(name_idx[cands[0]][0], name_idx, gi)
+        if got:
+            return got, "fuzzy"
     return None, "unmatched"
 
 
@@ -1152,12 +1187,14 @@ def main():
     atlases = AtlasCache(name_idx, gi)
     meshes = MeshCache(name_idx)
     sounds = SoundMatcher()
-    entries, stats = [], {"wrapper": 0, "direct": 0, "unmatched": 0}
+    entries, stats = [], {"wrapper": 0, "direct": 0, "fuzzy": 0,
+                          "unmatched": 0}
     consistency = [0, 0]
     sound_stats = [0, 0]   # matched configs, total configs
+    portal_keys = frozenset(n.lower() for n, _m in fx)
 
     for i, (name, maps) in enumerate(fx):
-        bp, how = resolve_blueprint(name, name_idx, gi)
+        bp, how = resolve_blueprint(name, name_idx, gi, portal_keys)
         stats[how] += 1
         entry = {"name": name, "portal_enum": name, "maps": maps, "match": how}
         if bp:
@@ -1285,7 +1322,8 @@ def main():
     nmesh = len(os.listdir(MESHOUT)) if os.path.isdir(MESHOUT) else 0
     print("\nwrote %s (%.1f KB)" % (out, os.path.getsize(out) / 1024))
     print("wrote %s (%.1f KB)" % (epout, os.path.getsize(epout) / 1024))
-    print("match: %(wrapper)d wrapper / %(direct)d direct / %(unmatched)d unmatched" % stats)
+    print("match: %(wrapper)d wrapper / %(direct)d direct / %(fuzzy)d fuzzy "
+          "/ %(unmatched)d unmatched" % stats)
     print("tiers: t1=%d t2=%d t3=%d mesh=%d   classes: %s" %
           (tiers[1], tiers[2], tiers[3], tiers[4], classes))
     print("override consistency (continuous, rate*life<=1.5*max): %d/%d" % tuple(consistency))

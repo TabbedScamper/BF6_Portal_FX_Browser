@@ -33,8 +33,11 @@ Run locally: `python -m http.server` inside `site/` (fetch() needs http).
 2. **Wrapper -> blueprint.** Each Portal FX has a
    `modbuilder_fx_<name>.ebx` SpatialPrefabBlueprint in the retail data
    (`game/glacierportal/gamemodes/spatial/fx/`); its import table points at the
-   real `fx_*.ebx` EffectBlueprint (317 resolve via wrapper, 15 via direct
-   name; 139 live in map superbundles not present in the local dumps).
+   real `fx_*.ebx` EffectBlueprint (432 resolve via wrapper, 11 via direct
+   name, 26 via a guarded fuzzy wrapper match -- authored names sometimes
+   carry an extra `_M`/`_GS` suffix, a map prefix, or a data-side typo like
+   "sucktion". The 2 leftovers are not particle effects at all: a burnt tree
+   and a debris-pile prefab gem).
 3. **Blueprint -> emitters.** The EffectBlueprint holds one
    `EmitterGraphEntityData` per emitter: a pointer to a shared `eg_*.ebx`
    EmitterGraph template, a per-emitter transform, an override block
@@ -67,35 +70,42 @@ Run locally: `python -m http.server` inside `site/` (fetch() needs http).
 
 | Tier | Badge | Meaning | Count |
 |-----:|-------|---------|------:|
-| 1 | LIVE | billboard/flipbook family — real sprites + decoded params | 258 |
+| 1 | LIVE | billboard/flipbook family — real sprites + decoded params | 380 |
 | 2 | PROC | sparks — procedural streaks from decoded gravity/bounce/speed/temperature | 17 |
-| 4 | MESH | mesh-particle preview — real game mesh + decoded spawn params | 10 |
-| 3 | SOON | placeholder — effect lives in an unmined map bundle (139), is a runtime-scripted stub, or runs on baked compute shaders (decals, screen effects) | 186 |
+| 4 | MESH | mesh-particle preview — real game mesh + decoded spawn params (utility unit-meshes excluded) | 8 |
+| 3 | SOON | placeholder — runtime-scripted stub or baked compute shaders (decals, screen effects) | 66 |
 
-Classes: fire 65, smoke 102, explosion 47, spark 14, water 9, debris 9, other 225.
+Classes: fire 65, smoke 102, explosion 47, spark 14, water 12, debris 9, other 222.
 
 ## What is real vs. approximated
 
 **Real decoded data** (used as-is): spawn rate & mode, particle lifetime and
 random life range, max/initial counts, spawn bounds per emitter, drag, wind
 strength, buoyancy, gravity, restitution, rotation speed & spawn rotation,
-opacity + fade direction, tint color, temperature (spark blackbody color),
-flipbook sheet + exact grid, mesh geometry, per-map availability.
+opacity + OpacityOverLife envelope, Color0/Color1 tints (linear RGB),
+BaseSize / SpawnSize / SizeCurve, SpawnSpeed (+min/mult/bias), temperature
+(spark blackbody color), flipbook sheet + exact grid, per-sheet render
+class (emissive/lit/6-way), mesh geometry, sound config names (+ SFX
+Library link where matched), per-map availability.
 
 **Approximated** (flagged in the data files):
 - `fps` — flipbook playback rate is baked into the compiled shader; the player
   spreads the frames over the particle lifetime (`frames / lifetime`).
-- particle **size / size-over-life** — lives in baked GPU compute shaders; the
-  per-class defaults in `editor_fx_params.json > class_defaults` are
-  visual-reference tuned and scale with each emitter's authored bounds.
-- billboard drift (updraft) — buoyancy in the data is 0 for most fires/smokes;
-  the real motion comes from the baked sim, so per-class rise defaults apply.
+- cubic interpretation of `*OverLife`/`*Curve` Vec4s (`a·t³+b·t²+c·t+d`,
+  anchored on the OpacityOverLife rise-fall envelope shapes).
+- particle size for emitters WITHOUT an authored BaseSize — per-class
+  defaults in `editor_fx_params.json > class_defaults` still apply there.
+- billboard drift (updraft) — the real motion comes from the baked sim; the
+  player integrates decoded SpawnSpeed + drag with a decaying buoyant assist.
 - 6-way smoke lighting — the player lights the base with a fixed light
   direction instead of the game's full 6-way relighting.
+- spawn direction — up-biased cone when only SpawnSpeed is authored.
+- burst replay period (in-game bursts are event-triggered one-shots).
 
-The consistency check `rate * lifetime <= 1.5 * max_count` holds for 821/1335
-looping emitters; burst emitters (explosions) intentionally exceed it and are
-detected exactly by that signature.
+The consistency check `rate * lifetime <= 1.5 * max_count` holds for
+1061/1697 looping emitters (the engine clamps at max, recycling the
+oldest); burst emitters are detected exactly by their SpawnModeBurst
+template type.
 
 ## editor_fx_params.json
 
